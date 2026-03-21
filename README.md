@@ -7,6 +7,7 @@
   <img src="https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js" />
   <img src="https://img.shields.io/badge/Groq_|_OpenRouter_|_Gemini-LLMs-4285F4?style=flat-square" />
   <img src="https://img.shields.io/badge/LangGraph-Pipeline-FF6F00?style=flat-square" />
+  <img src="https://img.shields.io/badge/Letta-MemGPT-8B5CF6?style=flat-square" />
   <img src="https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwind-css" />
   <img src="https://img.shields.io/badge/FastAPI-0.109-009688?style=flat-square&logo=fastapi" />
   <img src="https://img.shields.io/badge/SQLite-Audit_Trail-003B57?style=flat-square&logo=sqlite" />
@@ -167,6 +168,13 @@ flowchart TD
 </td>
 </tr>
 </table>
+
+### 🧠 Why Letta (Agent Memory) instead of RAG?
+
+Most AI financial tools use basic RAG (Retrieval-Augmented Generation) to search through old documents. FinClosePilot uses **Letta (formerly MemGPT)** to give the AI *true persistent memory*.
+
+- **The RAG Problem:** RAG blindly searches for keywords. If you ask a RAG bot "Why did we block Vendor X?", it just searches for "Vendor X" and gives you raw text snippets.
+- **The Letta Advantage:** Letta allows the agents to maintain a continuously updating "Core Memory" of the company's state. When a CFO overrides a strict guardrail (e.g., "Allow this specific Rs. 50k variance for Q3"), Letta writes that exact context into the agent's brain. In Q4, the agent *remembers* the CFO's past instruction and applies it automatically without needing to be prompted or searching a vector database.
 
 ---
 
