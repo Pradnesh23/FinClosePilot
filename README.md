@@ -4,13 +4,12 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-3776ab?style=flat-square&logo=python&logoColor=white" />
-  <img src="https://img.shields.io/badge/Next.js-14-black?style=flat-square&logo=next.js" />
-  <img src="https://img.shields.io/badge/Gemini-Flash_&_Pro-4285F4?style=flat-square&logo=google&logoColor=white" />
+  <img src="https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js" />
+  <img src="https://img.shields.io/badge/Groq_|_OpenRouter_|_Gemini-LLMs-4285F4?style=flat-square" />
   <img src="https://img.shields.io/badge/LangGraph-Pipeline-FF6F00?style=flat-square" />
-  <img src="https://img.shields.io/badge/Letta-MemGPT-8B5CF6?style=flat-square" />
+  <img src="https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwind-css" />
   <img src="https://img.shields.io/badge/FastAPI-0.109-009688?style=flat-square&logo=fastapi" />
   <img src="https://img.shields.io/badge/SQLite-Audit_Trail-003B57?style=flat-square&logo=sqlite" />
-  <img src="https://img.shields.io/badge/Telegram-CFO_Alerts-26A5E4?style=flat-square&logo=telegram" />
 </p>
 
 <p align="center">
@@ -152,7 +151,7 @@ flowchart TD
 
 | Tool | Purpose |
 |------|---------|
-| 🧠 **Gemini Flash/Pro** | LLM reasoning via smart router |
+| 🧠 **Tri-Provider Router** | OpenRouter / Groq / Gemini native routing |
 | 🗃️ **Letta (MemGPT)** | Cross-cycle persistent memory |
 | 🗄️ **SQLite** | Audit trail, runs, escalations |
 
@@ -214,13 +213,17 @@ flowchart TD
 | Borderline p-value (0.05–0.08) | Benford | 👤 Review |
 | Critical anomaly + low LLM confidence | Benford | 👔 CFO |
 
-### Model Routing Fallbacks
+### 🚦 Tri-Provider Smart Routing
+
+To handle high parallel throughput without hitting free-tier constraints, FinClosePilot features an **Async Tri-Provider LLM Router** that actively auto-routes workloads depending on your configured keys:
 
 ```
- gemini-1.5-pro  (rate-limited?)  →  gemini-2.0-flash
-                 (unavailable?)   →  gemini-1.5-flash
-                 (all fail?)      →  🐍 Python-only fallback
+ GROQ_API_KEY        →  Llama 3.3 70B (Fast) + DeepSeek-R1 (Complex)
+ OPENROUTER_API_KEY  →  Gemini Exp Free (Fast) + Llama 3.3 Free (Complex)
+ GEMINI_API_KEY      →  Gemini 2.0 Flash + Gemini 1.5 Pro
 ```
+
+*The router also catches 0-LLM, logic-only tasks (like `benford_calculation`) and explicitly forces pure Python mathematical execution, cutting LLM cost to $0 for heavy numerical lifting.*
 
 ---
 
@@ -263,8 +266,9 @@ pip install -r requirements.txt
 # 2 — Start Letta memory server
 letta server &
 
-# 3 — Configure
-cp .env.example .env   # Add: GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CFO_CHAT_ID
+# 3 — Configure (Pick at least one LLM provider)
+cp .env.example .env   
+# Edit .env and supply either GROQ_API_KEY, OPENROUTER_API_KEY, or GEMINI_API_KEY
 
 # 4 — Start backend
 uvicorn backend.main:app --reload &
@@ -281,7 +285,9 @@ cd frontend && npm install && npm run dev
 
 | Variable | Required | Description |
 |----------|:--------:|-------------|
-| `GEMINI_API_KEY` | ✅ | Google Gemini API key |
+| `OPENROUTER_API_KEY` | 1 of 3 | Recommended for free, high-rate LLM parallel routing |
+| `GROQ_API_KEY` | 1 of 3 | Lightning fast inference (Llama 3.3) |
+| `GEMINI_API_KEY` | 1 of 3 | Google Gemini native SDK |
 | `LETTA_SERVER_URL` | — | Letta server (default: `localhost:8283`) |
 | `TELEGRAM_BOT_TOKEN` | — | Bot token for CFO alerts |
 | `TELEGRAM_CFO_CHAT_ID` | — | CFO's Telegram chat ID |

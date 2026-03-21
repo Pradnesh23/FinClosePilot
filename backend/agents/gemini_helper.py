@@ -1,46 +1,74 @@
 """
-Common Gemini helper shared across all agents.
+Common helper shared across all agents.
+In Phase 2, this is now a proxy wrapper around the Tri-Provider `model_router`
+so that all legacy agents can use Groq, OpenRouter, or Gemini seamlessly without code changes.
 """
 
 import json
-import re
 import logging
-import google.generativeai as genai
-from backend.config import GEMINI_API_KEY, GEMINI_MODEL
+from backend.agents.model_router import route_call
+from backend.config import GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY
 
 logger = logging.getLogger(__name__)
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel(GEMINI_MODEL)
+# Basic safety check to ensure at least one key is present
+if not any([GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY]):
+    logger.warning("No LLM API keys found! Agents will fail.")
 
 
 async def call_gemini(system_prompt: str, user_message: str) -> str:
-    full_prompt = f"{system_prompt}\n\nUser: {user_message}"
-    response = model.generate_content(full_prompt)
-    return response.text
+    """Legacy method wrapper. Routes to the active provider as a 'flash' tier task."""
+    result = await route_call(
+        task_type="legacy_general_call",
+        system_prompt=system_prompt,
+        user_message=user_message,
+        run_id="legacy",
+        force_json=False
+    )
+    return result["response"]
 
 
 async def call_gemini_json(system_prompt: str, user_message: str) -> dict:
-    full_prompt = (
-        f"{system_prompt}\n\nUser: {user_message}\n\n"
-        "Return ONLY valid JSON. No markdown. No preamble."
+    """Legacy method wrapper. Routes to the active provider and parses JSON."""
+    result = await route_call(
+        task_type="legacy_json_call",
+        system_prompt=system_prompt,
+        user_message=user_message,
+        run_id="legacy",
+        force_json=True
     )
-    response = model.generate_content(full_prompt)
-    text = response.text.strip()
-    text = re.sub(r"^```json\s*", "", text)
-    text = re.sub(r"^```\s*", "", text)
-    text = re.sub(r"\s*```$", "", text)
+    
+    text = result["response"].strip()
+    
+    # Clean up standard markdown formatting
+    if text.startswith("```json"): text = text[7:]
+    elif text.startswith("```"): text = text[3:]
+    if text.endswith("```"): text = text[:-3]
+    text = text.strip()
+
     try:
         return json.loads(text)
     except json.JSONDecodeError:
+        # Retry logic just like the original
         retry_prompt = (
             f"{system_prompt}\n\nUser: {user_message}\n\n"
             "CRITICAL: Return ONLY a raw JSON object. No text before or after. No markdown backticks."
         )
-        retry_response = model.generate_content(retry_prompt)
-        retry_text = re.sub(r"```[a-z]*\n?", "", retry_response.text).strip()
+        retry_result = await route_call(
+            task_type="legacy_json_retry_call",
+            system_prompt="You are a strict JSON formatter.",
+            user_message=retry_prompt,
+            run_id="legacy_retry",
+            force_json=True
+        )
+        retry_text = retry_result["response"].strip()
+        if retry_text.startswith("```json"): retry_text = retry_text[7:]
+        elif retry_text.startswith("```"): retry_text = retry_text[3:]
+        if retry_text.endswith("```"): retry_text = retry_text[:-3]
+        retry_text = retry_text.strip()
+        
         try:
             return json.loads(retry_text)
         except json.JSONDecodeError as e:
-            logger.error(f"[Gemini] JSON parse failed after retry: {e}")
+            logger.error(f"[LLM Proxy] JSON parse failed after retry: {e}")
             return {"error": "json_parse_failed", "raw": retry_text[:500]}
