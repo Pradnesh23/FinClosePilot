@@ -1,0 +1,58 @@
+{
+  "period": "Q2 FY26",
+  "close_time_hours": 38,
+  "avg_pipeline_minutes": 24,
+  "matched_records": 890,
+  "total_records": 920,
+  "breaks": 30,
+  "anomalies": 12,
+  "guardrail_fires": 8,
+  "hard_blocks": 3,
+  "total_blocked_inr": 2150000,
+  "critic_score_avg": 0.87,
+  "cfo_overrides": 1,
+  "recurring_vendors": [
+    {
+      "vendor_name": "Reliance Industries",
+      "gstin": "27AAACR4849E1ZU",
+      "avg_monthly": 850000
+    },
+    {
+      "vendor_name": "Tata Consultancy Services",
+      "gstin": "27AAACT2727Q1ZX",
+      "avg_monthly": 450000
+    },
+    {
+      "vendor_name": "Infosys Ltd",
+      "gstin": "29AAACI1681G1ZK",
+      "avg_monthly": 230000
+    }
+  ],
+  "known_itc_blocks": [
+    {
+      "category": "Hospitality",
+      "rule": "CGST Section 17(5)(b)(i)",
+      "avg_quarterly": 185000
+    },
+    {
+      "category": "Personal Vehicle",
+      "rule": "CGST Section 17(5)(a)(ii)",
+      "avg_quarterly": 95000
+    }
+  ],
+  "budget_by_gl": {
+    "5100": 28500000,
+    "5200": 12000000,
+    "5300": 18000000,
+    "5400": 8000000,
+    "6100": 4500000,
+    "6200": 5200000,
+    "6300": 3800000
+  },
+  "gst_filings": {
+    "gstr1_filed": true,
+    "gstr3b_filed": true,
+    "gstr2b_reconciled": true,
+    "itc_ytd": 15240000
+  }
+}

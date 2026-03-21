@@ -1,0 +1,85 @@
+{
+  "ambiguous_fraud": {
+    "transaction": {
+      "transaction_id": "TXN-SURPRISE-001",
+      "vendor_name": "Rapid Solutions Pvt Ltd",
+      "vendor_gstin": null,
+      "amount": 500000,
+      "narration": "Consulting services Q3",
+      "date": "2026-01-31",
+      "invoice_no": "RS/2026/001",
+      "gl_account": "5400",
+      "type": "EXPENSE"
+    },
+    "context": "New vendor, no GSTIN, round amount Rs 5L, first transaction ever",
+    "expected_outcome": "ESCALATED — ambiguous fraud scenario detected",
+    "demo_talking_point": "Our agent doesn't assume fraud OR legitimacy. It escalates with both interpretations and lets the CFO decide with full evidence."
+  },
+  "unknown_regulation": {
+    "transaction": {
+      "transaction_id": "TXN-SURPRISE-002",
+      "vendor_name": "Dubai Trade LLC",
+      "amount": 850000,
+      "narration": "Import of goods under Special Economic Zone notification",
+      "hsn_code": "8471",
+      "gst_rate": 0,
+      "date": "2026-01-15",
+      "note": "SEZ import — complex zero-rated supply rules"
+    },
+    "context": "SEZ import with zero-rated supply, complex regulatory area",
+    "expected_outcome": "ESCALATED — SEZ-specific zero-rated supply rules outside standard knowledge",
+    "demo_talking_point": "The agent knows what it doesn't know. It identifies this as a complex SEZ transaction and escalates rather than guessing."
+  },
+  "rule_conflict": {
+    "transaction": {
+      "transaction_id": "TXN-SURPRISE-003",
+      "vendor_name": "ABC Pharma Ltd",
+      "amount": 2500000,
+      "narration": "Advance payment for supply of pharmaceutical products",
+      "date": "2026-02-01",
+      "note": "IndAS 115 says no revenue recognition on advance — but GST Section 12 says GST applies on advance received"
+    },
+    "conflicting_rules": [
+      {
+        "rule_id": "INDAS-115-REV",
+        "rule_level": "ADVISORY",
+        "regulation": "IndAS 115",
+        "section": "Performance Obligation",
+        "outcome": "Do NOT recognise revenue — performance obligation not met",
+        "action_taken": "Hold in advance liability",
+        "implication": "Revenue stays on balance sheet until delivery"
+      },
+      {
+        "rule_id": "GST-SEC12-TIME",
+        "rule_level": "HARD_BLOCK",
+        "regulation": "CGST Act Section 12",
+        "section": "Time of Supply",
+        "outcome": "GST IS applicable on advance received",
+        "action_taken": "Charge GST immediately",
+        "implication": "18% GST due on Rs 25L advance = Rs 4.5L immediate liability"
+      }
+    ],
+    "expected_outcome": "CONFLICT DETECTED — GST and IndAS 115 conflict on advance payment treatment",
+    "demo_talking_point": "Two regulations conflict on the same transaction. The agent surfaces both interpretations, explains the conflict, and refuses to act unilaterally."
+  },
+  "out_of_scope": {
+    "query": "Can you help me with ICD-10 medical coding for a patient discharge?",
+    "expected_outcome": "GRACEFUL DECLINE — outside financial close domain",
+    "demo_talking_point": "The agent knows its boundaries. It declines clearly, explains what it can do, and doesn't hallucinate an answer."
+  },
+  "auto_clear_trap": {
+    "transaction": {
+      "transaction_id": "TXN-SURPRISE-005",
+      "vendor_name": "Tata Consultancy Services",
+      "vendor_gstin": "27AAACT2727Q1ZX",
+      "amount": 4501000,
+      "date": "2025-12-31",
+      "payment_date": "2026-01-03",
+      "narration": "Annual IT maintenance contract payment",
+      "note": "Looks like timing difference but amount is Rs 4,501,000 not Rs 4,500,000 — Rs 1,000 discrepancy"
+    },
+    "context": "Recurring vendor with known payment pattern, but Rs 1000 mismatch",
+    "expected_outcome": "ESCALATED — timing difference pattern detected but amount mismatch prevents auto-clear",
+    "demo_talking_point": "The auto-clear logic doesn't just check dates — it validates amounts too. This Rs 1,000 discrepancy on a Rs 45L invoice prevents auto-clear and triggers review."
+  }
+}
