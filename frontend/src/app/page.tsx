@@ -10,14 +10,15 @@ import {
 import { formatCurrency } from "@/lib/utils";
 import { startDemo, getRun, WS_BASE } from "@/lib/api";
 
-import { GuardrailLog }   from "./components/GuardrailLog";
-import { BenfordChart }   from "./components/BenfordChart";
-import { AnomalyHeatmap } from "./components/AnomalyHeatmap";
-import { ReconResults }   from "./components/ReconResults";
-import { ReportViewer }   from "./components/ReportViewer";
-import { AuditQuery }     from "./components/AuditQuery";
-import { TaxOptimiser }   from "./components/TaxOptimiser";
-import { RegMonitor }     from "./components/RegMonitor";
+import { GuardrailLog }     from "./components/GuardrailLog";
+import { BenfordChart }     from "./components/BenfordChart";
+import { AnomalyHeatmap }   from "./components/AnomalyHeatmap";
+import { ReconResults }     from "./components/ReconResults";
+import { ReportViewer }     from "./components/ReportViewer";
+import { AuditQuery }       from "./components/AuditQuery";
+import { TaxOptimiser }     from "./components/TaxOptimiser";
+import { RegMonitor }       from "./components/RegMonitor";
+import { FileUploadModal }  from "./components/FileUploadModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type PipelineStatus = "IDLE" | "STARTED" | "RUNNING" | "COMPLETE" | "ERROR";
@@ -73,6 +74,7 @@ export default function Dashboard() {
   const [runData, setRunData]   = useState<Partial<RunData>>({});
   const [fullResult, setFullResult] = useState<any>({});
   const [activeTab, setActiveTab]   = useState<Tab>("live");
+  const [showUpload, setShowUpload] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll log terminal
@@ -124,6 +126,16 @@ export default function Dashboard() {
 
   const isComplete = status === "COMPLETE";
 
+  const handleUploadStart = (newRunId: string) => {
+    setShowUpload(false);
+    setStatus("STARTED");
+    setLogs([]);
+    setRunData({});
+    setFullResult({});
+    setActiveTab("live");
+    setRunId(newRunId);
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 font-sans">
       {/* ── Header ── */}
@@ -173,6 +185,13 @@ export default function Dashboard() {
                 500 transactions · GST/Bank/Vendor/IC recon · Benford fraud detection · CGST guardrails · GSTR-3B + Audit reports — all in one pipeline.
               </p>
               <div className="pt-6 flex flex-wrap items-center justify-center gap-4">
+                <button
+                  onClick={() => setShowUpload(true)}
+                  className="group inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-full font-semibold hover:brightness-110 transition-all shadow-xl shadow-indigo-500/20"
+                >
+                  <Upload className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                  Upload Files
+                </button>
                 <button
                   onClick={handleDemo}
                   className="group inline-flex items-center gap-2 px-8 py-4 bg-white text-black rounded-full font-semibold hover:bg-neutral-200 transition-all shadow-xl shadow-white/5"
@@ -332,6 +351,13 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {/* File Upload Modal */}
+      <FileUploadModal
+        open={showUpload}
+        onClose={() => setShowUpload(false)}
+        onStart={handleUploadStart}
+      />
     </div>
   );
 }

@@ -77,6 +77,27 @@ export async function testTelegram(): Promise<any> {
   return res.json();
 }
 
+// ─── File Upload ────────────────────────────────────────────────────────────
+
+export async function uploadFiles(files: {
+  transactions?: File;
+  bankStatement?: File;
+  gstPortal?: File;
+  form26as?: File;
+  period?: string;
+}): Promise<{ run_id: string }> {
+  const formData = new FormData();
+  if (files.transactions) formData.append("transactions", files.transactions);
+  if (files.bankStatement) formData.append("bank_statement", files.bankStatement);
+  if (files.gstPortal) formData.append("gst_portal", files.gstPortal);
+  if (files.form26as) formData.append("form26as", files.form26as);
+  formData.append("period", files.period ?? "Q3 FY26");
+
+  const res = await fetch(`${API_BASE}/upload`, { method: "POST", body: formData });
+  if (!res.ok) throw new Error("Upload failed");
+  return res.json();
+}
+
 // ─── Phase 2: Escalation + Cost + Surprise APIs ────────────────────────────
 
 export async function getEscalations(runId: string, unresolvedOnly = true): Promise<any> {

@@ -5,7 +5,7 @@ import clsx from "clsx";
 import {
   Play, RefreshCw, Zap, BarChart2, Search, FileText,
   IndianRupee, Globe, ShieldCheck, AlertTriangle,
-  Brain, Building2, Clock, TrendingUp,
+  Brain, Building2, Clock, TrendingUp, Upload,
 } from "lucide-react";
 import { startDemo, getRun, WS_BASE } from "@/lib/api";
 import { CloseDashboard }   from "@/app/components/CloseDashboard";
@@ -24,6 +24,7 @@ import { MultiEntityView }  from "@/app/components/MultiEntityView";
 import { Form26AS }         from "@/app/components/Form26AS";
 import { EscalationPanel }  from "@/app/components/EscalationPanel";
 import { CostEfficiency }   from "@/app/components/CostEfficiency";
+import { FileUploadModal }  from "@/app/components/FileUploadModal";
 import type { WsEvent }     from "@/lib/types";
 
 type Tab = {
@@ -58,6 +59,7 @@ export default function DashboardPage() {
   const [runData, setRunData]     = useState<any>({});
   const [fullResult, setFullResult] = useState<any>({});
   const [activeTab, setActiveTab]   = useState("feed");
+  const [showUpload, setShowUpload] = useState(false);
 
   // WebSocket connection
   useEffect(() => {
@@ -111,6 +113,16 @@ export default function DashboardPage() {
     setFullResult({});
   };
 
+  const handleUploadStart = (newRunId: string) => {
+    setShowUpload(false);
+    setStatus("STARTED");
+    setLogs([]);
+    setRunData({});
+    setFullResult({});
+    setActiveTab("feed");
+    setRunId(newRunId);
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 font-sans flex flex-col">
       {/* Header */}
@@ -134,12 +146,20 @@ export default function DashboardPage() {
               })}
             />
             {status === "IDLE" ? (
-              <button
-                onClick={handleDemo}
-                className="flex items-center gap-2 px-4 py-1.5 bg-white text-black rounded-lg text-sm font-semibold hover:bg-neutral-200 transition-colors"
-              >
-                <Play className="w-4 h-4 fill-black" /> Run Demo
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowUpload(true)}
+                  className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg text-sm font-semibold hover:brightness-110 transition-all shadow-lg shadow-indigo-500/20"
+                >
+                  <Upload className="w-4 h-4" /> Upload Files
+                </button>
+                <button
+                  onClick={handleDemo}
+                  className="flex items-center gap-2 px-4 py-1.5 bg-white text-black rounded-lg text-sm font-semibold hover:bg-neutral-200 transition-colors"
+                >
+                  <Play className="w-4 h-4 fill-black" /> Run Demo
+                </button>
+              </div>
             ) : (
               <button
                 onClick={handleReset}
@@ -260,6 +280,13 @@ export default function DashboardPage() {
           </div>
         </main>
       </div>
+
+      {/* File Upload Modal */}
+      <FileUploadModal
+        open={showUpload}
+        onClose={() => setShowUpload(false)}
+        onStart={handleUploadStart}
+      />
     </div>
   );
 }
