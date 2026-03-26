@@ -5,7 +5,7 @@ import clsx from "clsx";
 import {
   Play, CheckCircle2, AlertTriangle, XCircle, Clock, ShieldCheck,
   Zap, BarChart2, Search, FileText, IndianRupee, Globe, Upload,
-  RefreshCw, ChevronRight,
+  RefreshCw, ChevronRight, Database,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { startDemo, getRun, WS_BASE } from "@/lib/api";
@@ -16,9 +16,11 @@ import { AnomalyHeatmap }   from "./components/AnomalyHeatmap";
 import { ReconResults }     from "./components/ReconResults";
 import { ReportViewer }     from "./components/ReportViewer";
 import { AuditQuery }       from "./components/AuditQuery";
-import { TaxOptimiser }     from "./components/TaxOptimiser";
-import { RegMonitor }       from "./components/RegMonitor";
-import { FileUploadModal }  from "./components/FileUploadModal";
+import { TaxOptimiser }       from "./components/TaxOptimiser";
+import { RegMonitor }         from "./components/RegMonitor";
+import { FileUploadModal }    from "./components/FileUploadModal";
+import { PipelineProgress }   from "./components/PipelineProgress";
+import { DatasetViewer }      from "./components/DatasetViewer";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type PipelineStatus = "IDLE" | "STARTED" | "RUNNING" | "COMPLETE" | "ERROR";
@@ -34,7 +36,7 @@ type RunData = {
   time_taken_seconds: number;
 };
 
-type Tab = "live" | "recon" | "anomalies" | "guardrails" | "reports" | "tax" | "audit" | "regulatory";
+type Tab = "live" | "recon" | "anomalies" | "guardrails" | "reports" | "tax" | "audit" | "regulatory" | "datasets";
 
 const TABS: { id: Tab; label: string; icon: any }[] = [
   { id: "live",       label: "Live Feed",    icon: Zap },
@@ -45,6 +47,7 @@ const TABS: { id: Tab; label: string; icon: any }[] = [
   { id: "tax",        label: "Tax",          icon: IndianRupee },
   { id: "audit",      label: "Audit Query",  icon: Search },
   { id: "regulatory", label: "Reg Monitor",  icon: Globe },
+  { id: "datasets",   label: "Datasets",     icon: Database },
 ];
 
 // ─── Metric Card ─────────────────────────────────────────────────────────────
@@ -207,6 +210,9 @@ export default function Dashboard() {
         {/* ── Pipeline UI ── */}
         {status !== "IDLE" && (
           <div className="space-y-6">
+            {/* Pipeline Progress Stepper */}
+            <PipelineProgress logs={logs} pipelineStatus={status} />
+
             {/* Metrics Bar */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Metric label="Matched"    value={runData.matched_records ?? "—"} icon={CheckCircle2} color="emerald" />
@@ -314,7 +320,7 @@ export default function Dashboard() {
 
                 {/* Guardrails */}
                 {activeTab === "guardrails" && (
-                  <GuardrailLog fires={fullResult.guardrail_results?.all_fires ?? []} />
+                  <GuardrailLog fires={fullResult.guardrail_results?.all_fires ?? []} runId={runId ?? undefined} />
                 )}
 
                 {/* Reports */}
@@ -335,6 +341,11 @@ export default function Dashboard() {
                 {/* Regulatory */}
                 {activeTab === "regulatory" && (
                   <RegMonitor />
+                )}
+
+                {/* Datasets */}
+                {activeTab === "datasets" && (
+                  <DatasetViewer />
                 )}
               </div>
             </div>

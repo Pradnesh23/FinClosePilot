@@ -155,7 +155,7 @@ async def _send_message(text: str) -> bool:
             await bot.send_message(
                 chat_id=TELEGRAM_CFO_CHAT_ID,
                 text=text,
-                parse_mode=ParseMode.MARKDOWN_V2,
+                parse_mode=ParseMode.MARKDOWN,
             )
         logger.info("[Telegram] Message sent successfully.")
         return True
@@ -206,9 +206,30 @@ async def start_telegram_bot() -> None:
         await setup_telegram_handlers(_application)
         await _application.initialize()
         await _application.start()
-        logger.info("[Telegram] Bot started and polling.")
-        # Note: actual polling is handled by the run_polling() call in background
+
+        # Start polling for incoming commands (approve, view, review)
+        if _application.updater:
+            await _application.updater.start_polling(drop_pending_updates=True)
+            logger.info("[Telegram] Bot started and polling for commands.")
+        else:
+            logger.warning("[Telegram] Bot started but updater not available — commands won't work.")
     except ImportError:
         logger.warning("[Telegram] python-telegram-bot not installed.")
     except Exception as e:
         logger.warning(f"[Telegram] Bot startup failed: {e}")
+
+
+async def stop_telegram_bot() -> None:
+    """Graceful shutdown of the Telegram bot."""
+    global _application
+    if _application:
+        try:
+            if _application.updater and _application.updater.running:
+                await _application.updater.stop()
+            if _application.running:
+                await _application.stop()
+            await _application.shutdown()
+            logger.info("[Telegram] Bot stopped gracefully.")
+        except Exception as e:
+            logger.warning(f"[Telegram] Bot shutdown error: {e}")
+        _application = None

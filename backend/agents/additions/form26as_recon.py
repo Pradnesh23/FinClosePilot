@@ -60,7 +60,7 @@ Return ONLY valid JSON:
 
 
 async def parse_form26as_pdf(pdf_path: str) -> dict:
-    """Parse Form 26AS PDF using PyMuPDF."""
+    """Parse Form 26AS PDF using PyMuPDF. Falls back to Gemini Vision for scanned/image PDFs."""
     try:
         import fitz  # PyMuPDF
 
@@ -69,6 +69,48 @@ async def parse_form26as_pdf(pdf_path: str) -> dict:
         for page in doc:
             text_pages.append(page.get_text())
         full_text = "\n".join(text_pages)
+
+        # If text extraction yielded very little content, this is likely a scanned/image PDF
+        # Fall back to Gemini Vision for OCR + understanding
+        if len(full_text.strip()) < 100:
+            logger.info("[Form26AS] Sparse text detected — trying Gemini Vision fallback...")
+            try:
+                from backend.agents.gemini_helper import call_gemini_vision
+
+                # Convert first page (or all pages up to 3) to images
+                vision_results = []
+                for i, page in enumerate(doc):
+                    if i >= 3:  # Limit to 3 pages for cost
+                        break
+                    pix = page.get_pixmap(dpi=200)
+                    img_bytes = pix.tobytes("png")
+
+                    vision_prompt = (
+                        "Extract ALL data from this Form 26AS page. "
+                        "Include: Part A (TDS on salary), Part B (TDS on other income), Part C (Advance tax). "
+                        "For each entry extract: deductor name, TAN, amount, date. "
+                        "Return as JSON with keys: entries (list of {deductor, tan, amount, date, section}), "
+                        "page_number, part_type."
+                    )
+                    result = await call_gemini_vision(vision_prompt, img_bytes, "image/png")
+                    vision_results.append(result)
+
+                # Combine vision results into text
+                combined_text = json.dumps(vision_results, indent=2)
+                doc.close()
+
+                return {
+                    "raw_text": combined_text[:5000],
+                    "pages": len(text_pages),
+                    "parts_found": ["part_a", "part_b", "part_c"],
+                    "parts": {"vision_extracted": True},
+                    "extraction_method": "gemini_vision",
+                    "vision_data": vision_results,
+                }
+            except Exception as ve:
+                logger.warning(f"[Form26AS] Gemini Vision fallback failed: {ve}")
+                # Continue with sparse text below
+
         doc.close()
 
         # Extract key sections using text patterns
@@ -85,6 +127,7 @@ async def parse_form26as_pdf(pdf_path: str) -> dict:
             "pages": len(text_pages),
             "parts_found": list(parts.keys()),
             "parts": parts,
+            "extraction_method": "pymupdf_text",
         }
     except ImportError:
         logger.warning("[Form26AS] PyMuPDF not installed — using text placeholder.")
@@ -93,6 +136,7 @@ async def parse_form26as_pdf(pdf_path: str) -> dict:
             "pages": 1,
             "parts_found": ["part_a", "part_b", "part_c"],
             "parts": {},
+            "extraction_method": "placeholder",
         }
     except Exception as e:
         logger.error(f"[Form26AS] PDF parse failed: {e}")

@@ -72,3 +72,46 @@ async def call_gemini_json(system_prompt: str, user_message: str) -> dict:
         except json.JSONDecodeError as e:
             logger.error(f"[LLM Proxy] JSON parse failed after retry: {e}")
             return {"error": "json_parse_failed", "raw": retry_text[:500]}
+
+
+async def call_gemini_vision(system_prompt: str, image_bytes: bytes, mime_type: str = "image/png") -> dict:
+    """
+    Call Gemini Vision API with an image input for multimodal understanding.
+    Used as fallback for complex/scanned PDFs where text extraction fails.
+    """
+    from google import genai
+    from google.genai import types
+
+    if not GEMINI_API_KEY:
+        logger.warning("[GeminiVision] No GEMINI_API_KEY — falling back to empty result.")
+        return {"error": "no_api_key", "raw_text": ""}
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
+    try:
+        # Construct multimodal content
+        image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[system_prompt, image_part],
+            config=types.GenerateContentConfig(temperature=0.1),
+        )
+
+        text = response.text.strip()
+        # Try to parse as JSON
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {"raw_text": text, "parsed": False}
+    except Exception as e:
+        logger.error(f"[GeminiVision] API call failed: {e}")
+        return {"error": str(e), "raw_text": ""}

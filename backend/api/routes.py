@@ -429,6 +429,90 @@ async def telegram_test():
     return {"success": success, "message": "Test message sent" if success else "Telegram not configured"}
 
 
+# ─── Datasets ───────────────────────────────────────────────────────────────
+@router.get("/api/datasets")
+async def list_datasets():
+    """List all demo dataset files with metadata."""
+    import csv
+    from io import StringIO
+
+    demo_path = Path("./data/demo")
+    if not demo_path.exists():
+        return {"datasets": []}
+
+    datasets = []
+    for fp in sorted(demo_path.iterdir()):
+        if fp.name.startswith("."):
+            continue
+        meta = {
+            "name": fp.name,
+            "type": fp.suffix.lstrip("."),
+            "size_bytes": fp.stat().st_size,
+        }
+        # For CSV files, count rows and extract column names
+        if fp.suffix.lower() == ".csv":
+            try:
+                text = fp.read_text(encoding="utf-8")
+                reader = csv.reader(StringIO(text))
+                headers = next(reader, [])
+                row_count = sum(1 for _ in reader)
+                meta["rows"] = row_count
+                meta["columns"] = headers
+            except Exception:
+                pass
+        datasets.append(meta)
+
+    return {"datasets": datasets}
+
+
+@router.get("/api/datasets/{name}")
+async def get_dataset_content(name: str):
+    """Return parsed CSV content as JSON rows (max 500)."""
+    import csv
+    from io import StringIO
+
+    demo_path = Path("./data/demo") / name
+    if not demo_path.exists() or not demo_path.is_file():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    if demo_path.suffix.lower() == ".csv":
+        text = demo_path.read_text(encoding="utf-8")
+        reader = csv.DictReader(StringIO(text))
+        rows = []
+        columns = reader.fieldnames or []
+        for i, row in enumerate(reader):
+            if i >= 500:
+                break
+            rows.append(dict(row))
+        return {
+            "name": name,
+            "rows": rows,
+            "columns": list(columns),
+            "total_rows": len(rows),
+        }
+    elif demo_path.suffix.lower() == ".json":
+        content = json.loads(demo_path.read_text(encoding="utf-8"))
+        if isinstance(content, list):
+            columns = list(content[0].keys()) if content else []
+            return {
+                "name": name,
+                "rows": content[:500],
+                "columns": columns,
+                "total_rows": len(content),
+            }
+        else:
+            # Single object — wrap in array
+            columns = list(content.keys())
+            return {
+                "name": name,
+                "rows": [content],
+                "columns": columns,
+                "total_rows": 1,
+            }
+    else:
+        raise HTTPException(status_code=400, detail="Only CSV and JSON datasets are viewable")
+
+
 # ─── WebSocket ──────────────────────────────────────────────────────────────
 @router.websocket("/ws/{run_id}")
 async def websocket_endpoint(websocket: WebSocket, run_id: str):

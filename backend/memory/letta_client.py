@@ -18,8 +18,12 @@ try:
     from letta import create_client
     LETTA_AVAILABLE = True
 except ImportError:
-    LETTA_AVAILABLE = False
-    warnings.warn("[Letta] letta package not installed — using SQLite fallback.")
+    try:
+        from letta_client import create_client
+        LETTA_AVAILABLE = True
+    except ImportError:
+        LETTA_AVAILABLE = False
+        warnings.warn("[Letta] 'letta' package not installed — using SQLite fallback.")
 
 
 # ─── SQLite Fallback Helpers ────────────────────────────────────────────────

@@ -14,6 +14,7 @@ from backend.config import CORS_ORIGINS, DEBUG
 from backend.database.models import init_db
 from backend.api.routes import router, init_letta_on_startup
 from backend.agents.additions.regulatory_monitor import start_periodic_regulatory_monitor
+from backend.notifications.telegram_bot import stop_telegram_bot
 
 logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
@@ -51,7 +52,9 @@ async def lifespan(app: FastAPI):
     logger.info("[Startup] FinClosePilot ready ✅")
     yield
 
+    # Shutdown cleanup
     logger.info("[Shutdown] FinClosePilot shutting down...")
+    await stop_telegram_bot()
 
 
 app = FastAPI(

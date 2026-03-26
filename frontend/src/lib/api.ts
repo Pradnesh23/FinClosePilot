@@ -131,3 +131,15 @@ export async function triggerSurprise(scenarioType: string): Promise<any> {
   return res.json();
 }
 
+// ─── Datasets ───────────────────────────────────────────────────────────────
+
+export async function getDatasets(): Promise<any> {
+  const res = await fetch(`${API_BASE}/datasets`);
+  return res.json();
+}
+
+export async function getDatasetContent(name: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/datasets/${encodeURIComponent(name)}`);
+  return res.json();
+}
+

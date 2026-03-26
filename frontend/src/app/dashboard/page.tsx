@@ -5,7 +5,7 @@ import clsx from "clsx";
 import {
   Play, RefreshCw, Zap, BarChart2, Search, FileText,
   IndianRupee, Globe, ShieldCheck, AlertTriangle,
-  Brain, Building2, Clock, TrendingUp, Upload,
+  Brain, Building2, Clock, TrendingUp, Upload, Database,
 } from "lucide-react";
 import { startDemo, getRun, WS_BASE } from "@/lib/api";
 import { CloseDashboard }   from "@/app/components/CloseDashboard";
@@ -24,8 +24,10 @@ import { MultiEntityView }  from "@/app/components/MultiEntityView";
 import { Form26AS }         from "@/app/components/Form26AS";
 import { EscalationPanel }  from "@/app/components/EscalationPanel";
 import { CostEfficiency }   from "@/app/components/CostEfficiency";
-import { FileUploadModal }  from "@/app/components/FileUploadModal";
-import type { WsEvent }     from "@/lib/types";
+import { FileUploadModal }    from "@/app/components/FileUploadModal";
+import { PipelineProgress }   from "@/app/components/PipelineProgress";
+import { DatasetViewer }      from "@/app/components/DatasetViewer";
+import type { WsEvent }       from "@/lib/types";
 
 type Tab = {
   id: string;
@@ -48,6 +50,7 @@ const TABS: Tab[] = [
   { id: "predict",    label: "Predictive",   icon: Clock },
   { id: "entities",   label: "Entities",     icon: Building2 },
   { id: "form26as",   label: "Form 26AS",    icon: FileText },
+  { id: "datasets",   label: "Datasets",     icon: Database },
 ];
 
 type PipelineStatus = "IDLE" | "STARTED" | "RUNNING" | "COMPLETE" | "ERROR";
@@ -194,6 +197,12 @@ export default function DashboardPage() {
               </div>
             </>
           )}
+          {/* Pipeline Progress — always visible during run */}
+          {status !== "IDLE" && (
+            <div className="border-t border-white/5 pt-4">
+              <PipelineProgress logs={logs} pipelineStatus={status} />
+            </div>
+          )}
         </aside>
 
         {/* Main Content */}
@@ -239,7 +248,7 @@ export default function DashboardPage() {
               </div>
             )}
             {activeTab === "guardrails" && (
-              <GuardrailLog fires={fullResult.guardrail_results?.all_fires ?? []} />
+              <GuardrailLog fires={fullResult.guardrail_results?.all_fires ?? []} runId={runId ?? undefined} />
             )}
             {activeTab === "reports" && (
               <ReportViewer reports={fullResult.reports ?? {}} runId={runId ?? undefined} />
@@ -276,6 +285,9 @@ export default function DashboardPage() {
               <div className="rounded-xl border border-white/10 bg-neutral-900/50 p-5">
                 <CostEfficiency runId={runId} />
               </div>
+            )}
+            {activeTab === "datasets" && (
+              <DatasetViewer />
             )}
           </div>
         </main>

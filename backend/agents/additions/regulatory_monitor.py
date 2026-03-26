@@ -97,6 +97,24 @@ async def monitor_sebi() -> dict:
         return {"changes_found": [], "no_changes": True, "source": "SEBI"}
 
 
+async def monitor_mca() -> dict:
+    """Fetch MCA (Ministry of Corporate Affairs) notifications and extract new rules."""
+    url = "https://www.mca.gov.in/content/mca/global/en/acts-rules/ebooks/rules.html"
+    raw_text = await _fetch_url(url)
+
+    if not raw_text:
+        return {"changes_found": [], "no_changes": True, "source": "MCA", "error": "fetch_failed"}
+
+    user_msg = f"Source: MCA Rules and Notifications page\nURL: {url}\n\nPage content:\n{raw_text[:5000]}"
+    try:
+        result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
+        result["source"] = "MCA"
+        return result
+    except Exception as e:
+        logger.error(f"[RegMonitor] MCA extraction failed: {e}")
+        return {"changes_found": [], "no_changes": True, "source": "MCA"}
+
+
 async def update_guardrail_rules(agent_id: str, letta_client, changes: list) -> None:
     """Process extracted regulatory changes — store to Letta, DB, Telegram."""
     for change in changes:
@@ -132,10 +150,12 @@ async def run_regulatory_monitor(letta_client_, agent_id: str) -> dict:
 
     cbic_result = await monitor_cbic()
     sebi_result = await monitor_sebi()
+    mca_result = await monitor_mca()
 
     all_changes = []
     all_changes.extend(cbic_result.get("changes_found", []))
     all_changes.extend(sebi_result.get("changes_found", []))
+    all_changes.extend(mca_result.get("changes_found", []))
 
     if all_changes:
         await update_guardrail_rules(agent_id, letta_client_, all_changes)
@@ -145,6 +165,7 @@ async def run_regulatory_monitor(letta_client_, agent_id: str) -> dict:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "cbic_checked": not cbic_result.get("error"),
         "sebi_checked": not sebi_result.get("error"),
+        "mca_checked": not mca_result.get("error"),
         "changes_found": len(all_changes),
     })
 
@@ -153,6 +174,7 @@ async def run_regulatory_monitor(letta_client_, agent_id: str) -> dict:
         "changes": all_changes,
         "cbic_status": "ok" if not cbic_result.get("error") else "error",
         "sebi_status": "ok" if not sebi_result.get("error") else "error",
+        "mca_status": "ok" if not mca_result.get("error") else "error",
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 

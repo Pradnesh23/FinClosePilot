@@ -25,9 +25,8 @@ if OPENROUTER_API_KEY:
     clients["openrouter"] = AsyncOpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
 
 if GEMINI_API_KEY:
-    import google.generativeai as genai
-    genai.configure(api_key=GEMINI_API_KEY)
-    clients["gemini"] = True
+    from google import genai
+    clients["gemini"] = genai.Client(api_key=GEMINI_API_KEY)
 
 
 # Determine primary provider (priority: openrouter -> groq -> gemini)
@@ -44,8 +43,8 @@ elif GEMINI_API_KEY:
 # We define model names per provider
 PROVIDER_MODELS = {
     "openrouter": {
-        "flash": "google/gemini-2.0-flash-exp:free",
-        "pro": "meta-llama/llama-3.3-70b-instruct:free",
+        "flash": "google/gemini-2.0-flash-001",
+        "pro": "meta-llama/llama-3.3-70b-instruct",
     },
     "groq": {
         "flash": "llama-3.3-70b-versatile",
@@ -137,18 +136,33 @@ async def _call_openai_compatible(client, model_name: str, system_prompt: str, u
 
 
 async def _call_gemini_native(model_name: str, system_prompt: str, user_message: str, force_json: bool = False) -> tuple[str, int]:
-    import google.generativeai as genai
-    model = genai.GenerativeModel(model_name)
+    client = clients.get("gemini")
+    if not client:
+        raise ValueError("Gemini client not initialized")
+        
     full_prompt = f"{system_prompt}\n\nUser: {user_message}"
     if force_json:
-        full_prompt += "\n\nCRITTICAL: Return ONLY valid JSON. No markdown backticks."
+        full_prompt += "\n\nCRITICAL: Return ONLY valid JSON. No markdown backticks."
     
-    response = await model.generate_content_async(full_prompt)
-    try:
-        tokens = response.usage_metadata.total_token_count
-    except Exception:
-        tokens = max(len(full_prompt) // 4, 1) + max(len(response.text) // 4, 1)
+    response = client.models.generate_content(
+        model=model_name,
+        contents=full_prompt,
+    )
+    
+    tokens = getattr(response.usage_metadata, "total_token_count", 0) if response.usage_metadata else 0
     return response.text, tokens
+
+
+def _clean_json(text: str) -> str:
+    """Strips markdown backticks and extra noise from LLM JSON strings."""
+    text = text.strip()
+    if text.startswith("```"):
+        # Remove starting ```json or ```
+        text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+        # Remove ending ```
+        if text.endswith("```"):
+            text = text[:-3]
+    return text.strip()
 
 
 async def route_call(
@@ -173,9 +187,9 @@ async def route_call(
         log_model_usage(run_id, task_type, "PYTHON_ONLY", 0, 0)
         raise ValueError(f"Task '{task_type}' is routed to PYTHON_ONLY")
 
-    model_name = PROVIDER_MODELS[PRIMARY_PROVIDER][complexity]
+    model_name = PROVIDER_MODELS[PRIMARY_PROVIDER].get(complexity, "flash")
 
-    start = time.perf_counter()
+    start_time = time.perf_counter()
     tokens_used = 0
     
     try:
@@ -187,6 +201,12 @@ async def route_call(
             response_text, tokens_used = await _call_gemini_native(
                 model_name, system_prompt, user_message, force_json
             )
+        
+        # Clean JSON if requested
+        if force_json:
+            response_text = _clean_json(response_text)
+            
+        latency_ms = int((time.perf_counter() - start_time) * 1000)
     except Exception as e:
         logger.error(f"[ModelRouter] Failed using {PRIMARY_PROVIDER} model {model_name}: {e}")
         # Very simple fallback logic for the demo
