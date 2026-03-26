@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { RefreshCw, Loader2, Globe, AlertCircle } from "lucide-react";
 import { getRegulatoryUpdates, triggerRegulatoryCheck } from "@/lib/api";
 import clsx from "clsx";
@@ -31,6 +31,14 @@ export function RegMonitor({ initialChanges = [] }: { initialChanges?: Regulator
   const [changes, setChanges] = useState<RegulatoryChange[]>(initialChanges);
   const [loading, setLoading] = useState(false);
   const [triggered, setTriggered] = useState(false);
+
+  // Sync with prop updates (auto-load when pipeline finishes)
+  useEffect(() => {
+    if (initialChanges.length > 0) {
+      setChanges(initialChanges);
+    }
+  }, [initialChanges]);
+
 
   const handleRefresh = async () => {
     setLoading(true);

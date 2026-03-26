@@ -206,20 +206,37 @@ async def route_call(
             response_text = _clean_json(response_text)
     except Exception as e:
         logger.error(f"[ModelRouter] Failed using {PRIMARY_PROVIDER} model {model_name}: {e}")
-        # Very simple fallback logic for the demo
-        if complexity == "pro":
-            logger.warning("[ModelRouter] Falling back to flash tier...")
-            model_name = PROVIDER_MODELS[PRIMARY_PROVIDER]["flash"]
-            if PRIMARY_PROVIDER in ["openrouter", "groq"]:
-                response_text, tokens_used = await _call_openai_compatible(
-                    clients[PRIMARY_PROVIDER], model_name, system_prompt, user_message, force_json
-                )
-            else:
-                response_text, tokens_used = await _call_gemini_native(
-                    model_name, system_prompt, user_message, force_json
-                )
-        else:
-            raise
+        
+        # Cross-provider fallback: try ALL other available providers
+        fallback_providers = [p for p in clients.keys() if p != PRIMARY_PROVIDER]
+        response_text = None
+        
+        for fb_provider in fallback_providers:
+            try:
+                fb_model = PROVIDER_MODELS.get(fb_provider, {}).get(complexity, PROVIDER_MODELS.get(fb_provider, {}).get("flash"))
+                if not fb_model:
+                    continue
+                logger.warning(f"[ModelRouter] Falling back to {fb_provider} → {fb_model}")
+                model_name = fb_model  # update for stats tracking
+                
+                if fb_provider in ["openrouter", "groq"]:
+                    response_text, tokens_used = await _call_openai_compatible(
+                        clients[fb_provider], fb_model, system_prompt, user_message, force_json
+                    )
+                else:
+                    response_text, tokens_used = await _call_gemini_native(
+                        fb_model, system_prompt, user_message, force_json
+                    )
+                
+                if force_json and response_text:
+                    response_text = _clean_json(response_text)
+                break  # success
+            except Exception as fb_e:
+                logger.error(f"[ModelRouter] Fallback {fb_provider} also failed: {fb_e}")
+                continue
+        
+        if response_text is None:
+            raise  # all providers failed
 
     latency_ms = int((time.perf_counter() - start_time) * 1000)
 

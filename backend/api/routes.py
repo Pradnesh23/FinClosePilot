@@ -251,11 +251,17 @@ async def get_audit_package(run_id: str):
 # ─── Audit Query ─────────────────────────────────────────────────────────────
 @router.post("/api/audit/query")
 async def audit_query(req: AuditQueryRequest):
-    """Natural language audit trail query."""
+    """Natural language audit trail query with synthesized answer."""
+    from backend.agents.model_router import route_call
+    
     lc, ag = get_letta()
-    results = await query_audit_trail(lc, ag, req.question)
+    try:
+        results = await query_audit_trail(lc, ag, req.question)
+    except Exception:
+        results = []
 
     # Enrich with DB audit trail
+    db_trail = []
     if req.run_id:
         db_trail = get_audit_trail(req.run_id)
         keyword = req.question.lower()
@@ -264,9 +270,32 @@ async def audit_query(req: AuditQueryRequest):
             if any(k in (e.get("action", "") + e.get("agent", "") + str(e.get("details", ""))).lower()
                    for k in keyword.split())
         ]
-        results = relevant[:10] + results[:5]
+        results = relevant[:15] + results[:5]
 
-    return {"question": req.question, "results": results, "count": len(results)}
+    # Synthesize an answer if we have results
+    answer = "No relevant audit records found to answer this specific question."
+    if results:
+        context = "\n".join([
+            f"- [{r.get('agent', 'system')}] {r.get('action') or r.get('event')}: {str(r.get('details') or '')}"
+            for r in results[:10]
+        ])
+        
+        system_prompt = "You are a senior auditor. Answer the user's question concisely based ONLY on the provided audit trail logs. If the answer isn't there, say you don't know."
+        user_message = f"Audit Trail Context:\n{context}\n\nQuestion: {req.question}"
+        
+        try:
+            resp = await route_call("audit_query_response", system_prompt, user_message, run_id=req.run_id or "query")
+            answer = resp["response"]
+        except Exception as e:
+            answer = f"Error generating answer: {str(e)}"
+
+    return {
+        "question": req.question, 
+        "answer": answer,
+        "results": results, 
+        "count": len(results)
+    }
+
 
 
 # ─── RLHF Signal ─────────────────────────────────────────────────────────────

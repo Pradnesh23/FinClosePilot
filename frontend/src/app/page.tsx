@@ -334,7 +334,7 @@ export default function Dashboard() {
 
                 {/* Guardrails */}
                 {activeTab === "guardrails" && (
-                  <GuardrailLog fires={fullResult.guardrail_results?.all_fires ?? []} runId={runId ?? undefined} />
+                  <GuardrailLog fires={fullResult.guardrail_fires ?? []} runId={runId ?? undefined} />
                 )}
 
                 {/* Reports */}
@@ -344,7 +344,7 @@ export default function Dashboard() {
 
                 {/* Tax */}
                 {activeTab === "tax" && (
-                  <TaxOptimiser data={fullResult.tax_opportunities ?? {}} />
+                  <TaxOptimiser data={fullResult.reports?.tax_optimiser ?? {}} />
                 )}
 
                 {/* Audit Query */}
@@ -354,8 +354,9 @@ export default function Dashboard() {
 
                 {/* Regulatory */}
                 {activeTab === "regulatory" && (
-                  <RegMonitor />
+                  <RegMonitor initialChanges={fullResult.regulatory_updates ?? []} />
                 )}
+
 
                 {/* Datasets */}
                 {activeTab === "datasets" && (

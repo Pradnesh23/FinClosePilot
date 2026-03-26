@@ -61,8 +61,62 @@ const REPORT_LABELS: Record<string, string> = {
   tax_optimiser: "Tax Optimiser",
 };
 
+function Gstr3bTable({ data }: { data: any }) {
+  if (!data || typeof data !== "object") return null;
+  return (
+    <div className="space-y-4">
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs text-left border-collapse">
+          <thead>
+            <tr className="bg-white/5 border-b border-white/10 uppercase tracking-tighter text-neutral-500 font-bold">
+              <th className="px-3 py-2">Section / Description</th>
+              <th className="px-3 py-2 text-right">Taxable Value</th>
+              <th className="px-3 py-2 text-right">IGST</th>
+              <th className="px-3 py-2 text-right">CGST</th>
+              <th className="px-3 py-2 text-right">SGST</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {Object.entries(data).map(([key, val]: [string, any]) => (
+              <tr key={key} className="hover:bg-white/5">
+                <td className="px-3 py-2 font-medium text-neutral-300">{key.replace(/_/g, " ")}</td>
+                <td className="px-3 py-2 text-right text-white font-mono">{formatCurrency(val.taxable_value ?? 0)}</td>
+                <td className="px-3 py-2 text-right text-indigo-400 font-mono">{formatCurrency(val.igst ?? 0)}</td>
+                <td className="px-3 py-2 text-right text-emerald-400 font-mono">{formatCurrency(val.cgst ?? 0)}</td>
+                <td className="px-3 py-2 text-right text-emerald-400 font-mono">{formatCurrency(val.sgst ?? 0)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AuditCommitteeView({ data }: { data: any }) {
+  if (!data || typeof data !== "object") return null;
+  const sections = data.sections || data;
+  return (
+    <div className="space-y-6">
+      <div className="text-center border-b border-white/10 pb-4 mb-4">
+        <h3 className="text-lg font-bold text-white uppercase tracking-widest">Audit Committee Summary Report</h3>
+        <p className="text-xs text-neutral-500 mt-1">Ref: {data.report_id || "FC-AC-2026"}</p>
+      </div>
+      {Object.entries(sections).map(([title, content]: [string, any]) => (
+        <div key={title} className="space-y-2">
+          <h4 className="text-xs font-black text-indigo-400 uppercase tracking-wider">{title.replace(/_/g, " ")}</h4>
+          <div className="p-4 rounded-xl bg-black/40 border border-white/5 text-xs text-neutral-400 leading-relaxed whitespace-pre-wrap">
+            {typeof content === "string" ? content : JSON.stringify(content, null, 2)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ReportViewer({ reports, runId }: ReportViewerProps) {
   const [activeTab, setActiveTab] = useState(Object.keys(reports)[0] ?? "gstr3b");
+  const [viewMode, setViewMode] = useState<"formatted" | "json">("formatted");
 
   const tabs = Object.keys(REPORT_LABELS).filter(
     (k) => reports[k] !== undefined && reports[k] !== null
@@ -86,9 +140,13 @@ export function ReportViewer({ reports, runId }: ReportViewerProps) {
     a.click();
   };
 
+  const printReport = () => {
+    window.print();
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex gap-1 bg-black/40 rounded-xl p-1">
           {tabs.map((t) => (
             <button
@@ -104,17 +162,62 @@ export function ReportViewer({ reports, runId }: ReportViewerProps) {
             </button>
           ))}
         </div>
-        <button
-          onClick={downloadReport}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-xs text-neutral-400 hover:text-white transition-colors"
-        >
-          <Download className="w-3.5 h-3.5" /> Export JSON
-        </button>
+        
+        <div className="flex gap-2">
+          <div className="flex bg-neutral-900 rounded-lg p-1 border border-white/5">
+            <button
+              onClick={() => setViewMode("formatted")}
+              className={`px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider transition-all ${
+                viewMode === "formatted" ? "bg-white/10 text-white" : "text-neutral-600"
+              }`}
+            >
+              Formatted
+            </button>
+            <button
+              onClick={() => setViewMode("json")}
+              className={`px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider transition-all ${
+                viewMode === "json" ? "bg-white/10 text-white" : "text-neutral-600"
+              }`}
+            >
+              JSON
+            </button>
+          </div>
+          <button
+            onClick={downloadReport}
+            title="Export JSON"
+            className="p-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white transition-colors border border-white/5"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            onClick={printReport}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-bold shadow-lg shadow-indigo-500/20"
+          >
+            <FileText className="w-3.5 h-3.5" /> PDF
+          </button>
+        </div>
       </div>
 
-      <div className="bg-black/40 rounded-xl p-4 font-mono text-xs overflow-auto max-h-96 border border-white/5">
-        <JsonViewer data={reports[activeTab]} />
+      <div className="rounded-xl border border-white/5 overflow-hidden min-h-[300px] print:border-none print:shadow-none">
+        <div className="bg-black/40 p-6 print:bg-white print:text-black">
+          {viewMode === "json" ? (
+            <div className="font-mono text-xs overflow-auto max-h-[500px]">
+              <JsonViewer data={reports[activeTab]} />
+            </div>
+          ) : (
+            <div className="animate-in fade-in duration-500">
+              {activeTab === "gstr3b" && <Gstr3bTable data={reports[activeTab]} />}
+              {activeTab === "audit_committee" && <AuditCommitteeView data={reports[activeTab]} />}
+              {activeTab !== "gstr3b" && activeTab !== "audit_committee" && (
+                <div className="font-mono text-xs overflow-auto max-h-[500px]">
+                  <JsonViewer data={reports[activeTab]} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
+

@@ -27,8 +27,9 @@ export function BenfordChart({ observed = {} }: BenfordChartProps) {
         Compares actual first-digit distribution against Benford&apos;s Law prediction.
         Red bars indicate suspicious deviations.
       </p>
-      <div className="h-56">
-        <ResponsiveContainer width="100%" height="100%">
+      <div className="h-56 min-h-[224px] w-full">
+        <ResponsiveContainer width="100%" height="100%" minHeight={224}>
+
           <BarChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
             <XAxis dataKey="digit" tick={{ fill: "#737373", fontSize: 12 }} />
             <YAxis tick={{ fill: "#737373", fontSize: 11 }} />

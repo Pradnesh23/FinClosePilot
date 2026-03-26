@@ -73,7 +73,7 @@ export function DatasetViewer() {
   // Filter and sort rows
   const displayRows = (() => {
     if (!content) return [];
-    let rows = content.rows;
+    let rows = content.rows ?? [];
 
     // Search filter
     if (searchTerm) {
@@ -197,7 +197,7 @@ export function DatasetViewer() {
                   <thead className="sticky top-0 bg-neutral-900/95 backdrop-blur-sm z-10">
                     <tr>
                       <th className="px-3 py-2 text-left text-neutral-600 font-medium w-10">#</th>
-                      {content.columns.map((col) => (
+                      {(content.columns ?? []).map((col) => (
                         <th
                           key={col}
                           onClick={() => handleSort(col)}
@@ -218,7 +218,7 @@ export function DatasetViewer() {
                         className="border-t border-white/[0.03] hover:bg-white/[0.03] transition-colors"
                       >
                         <td className="px-3 py-1.5 text-neutral-700 font-mono">{i + 1}</td>
-                        {content.columns.map((col) => (
+                        {(content.columns ?? []).map((col) => (
                           <td key={col} className="px-3 py-1.5 text-neutral-300 whitespace-nowrap max-w-[200px] truncate">
                             {String(row[col] ?? "")}
                           </td>
