@@ -202,11 +202,8 @@ async def route_call(
                 model_name, system_prompt, user_message, force_json
             )
         
-        # Clean JSON if requested
         if force_json:
             response_text = _clean_json(response_text)
-            
-        latency_ms = int((time.perf_counter() - start_time) * 1000)
     except Exception as e:
         logger.error(f"[ModelRouter] Failed using {PRIMARY_PROVIDER} model {model_name}: {e}")
         # Very simple fallback logic for the demo
@@ -224,7 +221,7 @@ async def route_call(
         else:
             raise
 
-    latency_ms = int((time.perf_counter() - start) * 1000)
+    latency_ms = int((time.perf_counter() - start_time) * 1000)
 
     # Track stats
     stats = _get_or_create_stats(run_id)

@@ -28,7 +28,7 @@ from backend.agents.learning.rlhf_collector import collect_cfo_override
 from backend.api.websocket import manager
 from backend.memory.letta_client import (
     init_letta_client, create_or_get_agent, query_audit_trail,
-    seed_past_period_data,
+    seed_past_period_data, get_archival_by_label, LettaClientWrapper,
 )
 from backend.notifications.telegram_bot import send_test_message
 
@@ -213,11 +213,18 @@ async def get_run_result(run_id: str):
     finally:
         conn.close()
 
+    # Fetch structured results from Letta for frontend components (Heatmaps, Charts)
+    lc, ag = get_letta()
+    recon_results = await get_archival_by_label(lc, ag, f"recon_{run_id}")
+    anomalies_summary = await get_archival_by_label(lc, ag, f"anomalies_{run_id}")
+
     return {
         "run": run,
         "reports": reports,
         "guardrail_fires": guardrail_fires,
-        "anomalies": anomalies,
+        "anomalies": anomalies_summary or {},
+        "anomaly_records": anomalies,
+        "recon_results": recon_results or {},
         "audit_trail": audit_trail,
     }
 

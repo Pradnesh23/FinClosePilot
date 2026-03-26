@@ -112,6 +112,47 @@ def get_run(run_id: str) -> dict | None:
         conn.close()
 
 
+def save_transaction(run_id: str, txn: dict) -> None:
+    """Save a normalised transaction."""
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO transactions
+                (run_id, transaction_id, date, vendor_name, vendor_gstin,
+                 invoice_no, amount, type, narration, gl_account, hsn_code,
+                 gst_rate, igst, cgst, sgst, source, cost_centre, vendor_type, raw_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                txn.get("id") or txn.get("transaction_id"),
+                txn.get("date"),
+                txn.get("vendor_canonical") or txn.get("vendor_name"),
+                txn.get("vendor_gstin"),
+                txn.get("invoice_no") or txn.get("reference_no"),
+                txn.get("amount"),
+                txn.get("type"),
+                txn.get("narration"),
+                txn.get("gl_account"),
+                txn.get("hsn_code"),
+                txn.get("gst_rate"),
+                txn.get("igst"),
+                txn.get("cgst"),
+                txn.get("sgst"),
+                txn.get("source"),
+                txn.get("cost_centre"),
+                txn.get("vendor_type"),
+                json.dumps(txn.get("raw_data", {})),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"[AuditLogger] Failed to save transaction: {e}")
+    finally:
+        conn.close()
+
+
 def list_runs(limit: int = 50) -> list:
     """List all pipeline runs, newest first."""
     conn = get_db_connection()
@@ -156,8 +197,46 @@ def save_guardrail_fire(run_id: str, fire: dict) -> int:
         conn.close()
 
 
+def save_recon_break(run_id: str, brk: dict) -> None:
+    """Save a reconciliation break."""
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO recon_breaks
+                (run_id, recon_type, break_category, vendor_name, vendor_gstin,
+                 transaction_id, amount, source_a_amount, source_b_amount,
+                 difference, root_cause, auto_clearable, confidence,
+                 regulation, ai_reasoning, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')
+            """,
+            (
+                run_id,
+                brk.get("recon_type") or "GST",
+                brk.get("break_type") or brk.get("root_cause"),
+                brk.get("vendor_name"),
+                brk.get("vendor_gstin"),
+                brk.get("invoice_no") or brk.get("reference_no") or brk.get("transaction_id"),
+                brk.get("difference"),
+                brk.get("books_amount") or brk.get("gl_amount"),
+                brk.get("gstr2a_amount") or brk.get("bank_amount"),
+                brk.get("difference"),
+                brk.get("root_cause") or brk.get("break_type"),
+                1 if brk.get("auto_clearable") else 0,
+                brk.get("confidence"),
+                brk.get("regulation"),
+                brk.get("ai_reasoning") or brk.get("description"),
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"[AuditLogger] Failed to save recon break: {e}")
+    finally:
+        conn.close()
+
+
 def get_guardrail_fires(run_id: str) -> list:
-    """Get all guardrail fires for a run."""
+    """Fetch all guardrail fires for a specific run."""
     conn = get_db_connection()
     try:
         rows = conn.execute(

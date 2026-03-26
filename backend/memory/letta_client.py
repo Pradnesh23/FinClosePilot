@@ -151,17 +151,36 @@ async def create_or_get_agent(client: LettaClientWrapper, name: str = "FinCloseP
         return f"fallback_{name}"
 
 
-async def store_to_archival(client: LettaClientWrapper, agent_id: str, data_dict: dict) -> None:
-    """Insert JSON data to archival memory."""
+async def store_to_archival(client: LettaClientWrapper, agent_id: str, data_dict: dict, label: str = "archival") -> None:
+    """Insert JSON data to archival memory with an optional label."""
     if client._use_fallback or agent_id.startswith("fallback_"):
-        _sqlite_store(agent_id, "archival", "archival", data_dict)
+        _sqlite_store(agent_id, "archival", label, data_dict)
         return
     try:
-        text = json.dumps(data_dict)
+        text = f"[{label}] {json.dumps(data_dict)}" if label != "archival" else json.dumps(data_dict)
         client.client.insert_archival_memory(agent_id=agent_id, memory=text)
     except Exception as e:
         logger.warning(f"[Letta] store_to_archival failed: {e} — using fallback")
-        _sqlite_store(agent_id, "archival", "archival", data_dict)
+        _sqlite_store(agent_id, "archival", label, data_dict)
+
+
+async def get_archival_by_label(client: LettaClientWrapper, agent_id: str, label: str) -> Any:
+    """Retrieve the latest archival entry with a specific label."""
+    if client._use_fallback or agent_id.startswith("fallback_"):
+        return _sqlite_get_label(agent_id, label)
+    
+    try:
+        # Note: Letta SDK might use get_archival_memory or similar
+        # For now, we rely on the fallback or common search pattern
+        results = client.client.get_archival_memory(agent_id=agent_id, limit=50)
+        for r in results:
+            if r.text.startswith(f"[{label}] "):
+                json_str = r.text.replace(f"[{label}] ", "", 1)
+                return json.loads(json_str)
+        return None
+    except Exception:
+        # Fallback to sqlite if SDK call fails or method name is different
+        return _sqlite_get_label(agent_id, label)
 
 
 async def search_recall(client: LettaClientWrapper, agent_id: str, query: str, limit: int = 10) -> list:

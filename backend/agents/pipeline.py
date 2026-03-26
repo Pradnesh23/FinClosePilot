@@ -98,6 +98,10 @@ async def node_ingest(state: PipelineState) -> PipelineState:
     state["normalised_data"] = results
     db.update_run(run_id, total_records=len(results), status="RECONCILING")
 
+    # Save normalised transactions to DB
+    for t in results:
+        db.save_transaction(run_id, t)
+
     elapsed = asyncio.get_event_loop().time() - t0
     await store_close_duration(run_id, "INGESTING", int(elapsed), state["letta_client"], state["agent_id"])
     await _ws(state, "INGESTING", "Data Ingestion Agent",
@@ -158,6 +162,20 @@ async def node_reconcile(state: PipelineState) -> PipelineState:
 
     db.update_run(run_id, matched_records=matched, breaks=total_breaks, status="DETECTING_ANOMALIES")
 
+    # Save recon breaks to DB
+    for brk in gst_r.get("breaks", []):
+        brk["recon_type"] = "GST"
+        db.save_recon_break(run_id, brk)
+    for brk in bank_r.get("breaks", []):
+        brk["recon_type"] = "BANK"
+        db.save_recon_break(run_id, brk)
+    for brk in vendor_r.get("breaks", []):
+        brk["recon_type"] = "VENDOR"
+        db.save_recon_break(run_id, brk)
+
+    # Store structured recon summary for frontend
+    await letta_mod.store_to_archival(state["letta_client"], state["agent_id"], state["recon_results"], label=f"recon_{run_id}")
+
     elapsed = asyncio.get_event_loop().time() - t0
     await store_close_duration(run_id, "RECONCILING", int(elapsed), state["letta_client"], state["agent_id"])
     await _ws(state, "RECONCILING", "Reconciliation Agents",
@@ -202,6 +220,9 @@ async def node_detect_anomalies(state: PipelineState) -> PipelineState:
     # Save anomalies to DB
     for a in all_anomalies:
         db.save_anomaly(run_id, a)
+
+    # Store structured anomaly summary for frontend heatmap/charts
+    await letta_mod.store_to_archival(state["letta_client"], state["agent_id"], state["anomalies"], label=f"anomalies_{run_id}")
 
     elapsed = asyncio.get_event_loop().time() - t0
     await store_close_duration(run_id, "DETECTING_ANOMALIES", int(elapsed), state["letta_client"], state["agent_id"])

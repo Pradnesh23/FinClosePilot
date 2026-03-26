@@ -93,8 +93,22 @@ export default function Dashboard() {
       const msg = JSON.parse(data);
       if (msg.event === "CONNECTED" || msg.event === "PING") return;
       setLogs((p) => [...p, msg]);
-      if (msg.event === "COMPLETE") {
-        setStatus("COMPLETE");
+      
+      // Merge real-time metrics into runData
+      if (msg.data) {
+        setRunData((p) => ({
+          ...p,
+          matched_records:    msg.data.matched    ?? p.matched_records,
+          breaks:             msg.data.breaks     ?? p.breaks,
+          anomalies:          msg.data.anomalies  ?? p.anomalies,
+          guardrail_fires:    msg.data.fires      ?? p.guardrail_fires,
+          hard_blocks:        msg.data.hard_blocks ?? p.hard_blocks,
+          total_blocked_inr:  msg.data.blocked_inr ?? p.total_blocked_inr,
+        }));
+      }
+
+      if (msg.event.startsWith("COMPLETE")) {
+        setStatus(msg.event);
       } else {
         setStatus("RUNNING");
       }
@@ -105,7 +119,7 @@ export default function Dashboard() {
 
   // Fetch full run result when pipeline completes
   useEffect(() => {
-    if (status === "COMPLETE" && runId) {
+    if (status?.startsWith("COMPLETE") && runId) {
       getRun(runId).then((d) => {
         setRunData(d.run ?? {});
         setFullResult(d);
@@ -127,7 +141,7 @@ export default function Dashboard() {
     }
   };
 
-  const isComplete = status === "COMPLETE";
+  const isComplete = status?.startsWith("COMPLETE");
 
   const handleUploadStart = (newRunId: string) => {
     setShowUpload(false);
