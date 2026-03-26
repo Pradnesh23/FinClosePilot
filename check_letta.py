@@ -14,9 +14,9 @@ print(f"Configured URL: {LETTA_SERVER_URL}")
 try:
     wrapper = init_letta_client()
     if wrapper._use_fallback:
-        print("❌ FAILED: The client is using the SQLite fallback. Letta server is likely unreachable.")
+        print("[-] FAILED: The client is using the SQLite fallback. Letta server is likely unreachable.")
     else:
-        print("✅ SUCCESS: Connected to Letta server!")
+        print("[+] SUCCESS: Connected to Letta server!")
         
         # Test agent listing
         try:
@@ -25,7 +25,7 @@ try:
             for a in agents:
                 print(f" - Agent: {a.name} (id: {a.id})")
         except Exception as e:
-            print(f"❌ Error listing agents: {e}")
+            print(f"[-] Error listing agents: {e}")
             
 except Exception as e:
-    print(f"❌ CRITICAL ERROR: {e}")
+    print(f"[-] CRITICAL ERROR: {e}")

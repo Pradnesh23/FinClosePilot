@@ -7,34 +7,34 @@ from dotenv import load_dotenv
 sys.path.append(os.getcwd())
 
 async def check_letta():
-    print("\n--- 🧠 Letta Memory Check ---")
+    print("\n--- [MEMORY] Letta Memory Check ---")
     from backend.config import LETTA_SERVER_URL
     from backend.memory.letta_client import init_letta_client
     print(f"URL: {LETTA_SERVER_URL}")
     if "api.letta.com" in LETTA_SERVER_URL:
-        print("💡 TIP: You are using the HOSTED Letta API. If you set up a private cloud server, update LETTA_SERVER_URL in .env to your server's IP.")
+        print("[TIP] You are using the HOSTED Letta API. If you set up a private cloud server, update LETTA_SERVER_URL in .env to your server's IP.")
     
     try:
         wrapper = init_letta_client()
         if wrapper._use_fallback:
-            print("❌ Letta: Unreachable (Using SQLite fallback)")
+            print("[ERROR] Letta: Unreachable (Using SQLite fallback)")
             return False
         else:
             try:
                 agents = wrapper.client.list_agents()
-                print(f"✅ Letta: Connected! ({len(agents)} agents found)")
+                print(f"[OK] Letta: Connected! ({len(agents)} agents found)")
                 return True
             except Exception as e:
-                print(f"❌ Letta list_agents failed: {e}")
+                print(f"[ERROR] Letta list_agents failed: {e}")
                 if "AgentState" in str(e):
-                    print("💡 TIP: This 'AgentState' error often means a version mismatch between your Letta SDK and the server. Try updating 'letta' in requirements.txt and running 'pip install -r requirements.txt'.")
+                    print("[TIP] This 'AgentState' error often means a version mismatch between your Letta SDK and the server. Try updating 'letta' in requirements.txt and running 'pip install -r requirements.txt'.")
                 return False
     except Exception as e:
-        print(f"❌ Letta Error: {e}")
+        print(f"[ERROR] Letta Error: {e}")
         return False
 
 async def check_llm():
-    print("\n--- 🤖 LLM Multi-Provider Check ---")
+    print("\n--- [LLM] Multi-Provider Check ---")
     from backend.config import GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY
     from backend.agents.model_router import route_call, PRIMARY_PROVIDER
     
@@ -46,12 +46,12 @@ async def check_llm():
     
     for name, key in keys.items():
         if key:
-            print(f"✅ {name} Key: Found (starts with '{key[:6]}...')")
+            print(f"[OK] {name} Key: Found (starts with '{key[:6]}...')")
         else:
-            print(f"⚪ {name} Key: Not configured")
+            print(f"[SKIP] {name} Key: Not configured")
 
     if not PRIMARY_PROVIDER:
-        print("❌ CRITICAL: No primary LLM provider found. Agents will not work.")
+        print("[ERROR] CRITICAL: No primary LLM provider found. Agents will not work.")
         return False
     
     print(f"Primary Provider: {PRIMARY_PROVIDER.upper()}")
@@ -66,19 +66,19 @@ async def check_llm():
         )
         response = result.get("response", "").strip()
         latency = result.get("latency_ms", 0)
-        print(f"✅ AI Response: '{response}' (Latency: {latency}ms)")
+        print(f"[OK] AI Response: '{response}' (Latency: {latency}ms)")
         return True
     except Exception as e:
-        print(f"❌ Inference Failed: {e}")
+        print(f"[ERROR] Inference Failed: {e}")
         if "404" in str(e) and "openrouter" in str(e).lower():
-            print("💡 TIP: OpenRouter model name might be outdated. I've updated model_router.py to fix this.")
+            print("[TIP] OpenRouter model name might be outdated. I've updated model_router.py to fix this.")
         return False
 
 async def check_telegram():
-    print("\n--- 🔔 Telegram Notification Check ---")
+    print("\n--- [TELEGRAM] Notification Check ---")
     from backend.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CFO_CHAT_ID
     if not TELEGRAM_BOT_TOKEN:
-        print("⚪ Telegram: Not configured")
+        print("[SKIP] Telegram: Not configured")
         return True
     
     import httpx
@@ -89,17 +89,17 @@ async def check_telegram():
             if resp.status_code == 200:
                 data = resp.json()
                 bot_name = data.get("result", {}).get("first_name", "Unknown")
-                print(f"✅ Telegram: Connected as @{bot_name}")
+                print(f"[OK] Telegram: Connected as @{bot_name}")
                 if TELEGRAM_CFO_CHAT_ID:
-                    print(f"✅ CFO Chat ID: {TELEGRAM_CFO_CHAT_ID}")
+                    print(f"[OK] CFO Chat ID: {TELEGRAM_CFO_CHAT_ID}")
                 else:
-                    print("⚠️ Note: TELEGRAM_CFO_CHAT_ID is missing.")
+                    print("[WARN] Note: TELEGRAM_CFO_CHAT_ID is missing.")
                 return True
             else:
-                print(f"❌ Telegram API Error: {resp.status_code}")
+                print(f"[ERROR] Telegram API Error: {resp.status_code}")
                 return False
     except Exception as e:
-        print(f"❌ Telegram Connection Failed: {e}")
+        print(f"[ERROR] Telegram Connection Failed: {e}")
         return False
 
 async def main():
@@ -110,10 +110,11 @@ async def main():
     # Check .env location
     env_path = os.path.join(os.getcwd(), ".env")
     if os.path.exists(env_path):
-        print(f"✅ .env found in project root: {env_path}")
+        print(f"[OK] .env found in project root: {env_path}")
+
         load_dotenv(env_path)
     else:
-        print(f"⚠️ .env NOT FOUND in project root.")
+        print(f"[WARN] .env NOT FOUND in project root.")
         print(f"Current Directory: {os.getcwd()}")
     
     await check_letta()

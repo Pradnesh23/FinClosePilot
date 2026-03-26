@@ -42,12 +42,21 @@ export async function login(payload: any): Promise<any> {
 }
 
 export async function register(payload: any): Promise<any> {
+  const formData = new URLSearchParams();
+  formData.append("username", payload.username);
+  formData.append("email", payload.email);
+  formData.append("password", payload.password);
+  formData.append("role", payload.role || "EMPLOYEE");
+
   const res = await fetch(`${API_BASE}/auth/register`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: formData,
   });
-  if (!res.ok) throw new Error("Registration failed");
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || "Registration failed");
+  }
   return res.json();
 }
 

@@ -21,7 +21,7 @@
 
 ## 🎯 What Is This?
 
-FinClosePilot is a **multi-agent AI system** that automates the Indian enterprise financial close process — reconciliation, anomaly detection, regulatory compliance, and report generation — using a coordinated swarm of **12 specialised agents** orchestrated by **LangGraph**.
+FinClosePilot is a **multi-agent AI system** that automates the Indian enterprise financial close process — reconciliation, anomaly detection, regulatory compliance, and report generation — using a coordinated swarm of **12 specialised agents** orchestrated by **LangGraph**. Now featuring **Multi-User Manager-Employee workflows** and a comprehensive **14-tab audit dashboard**.
 
 <table>
 <tr>
@@ -38,6 +38,7 @@ FinClosePilot is a **multi-agent AI system** that automates the Indian enterpris
 
 ### ✅ The Solution
 - **12 AI agents** running in parallel pipeline
+- **Multi-Role Access**: Manager oversight for Employee-run close cycles
 - Confidence-based **self-escalation** (never auto-approves uncertain items)
 - **18+ hardcoded regulatory rules** with exact citations
 - Persistent memory via **Letta (MemGPT)**
@@ -289,6 +290,26 @@ cd frontend && npm install && npm run dev
 
 ---
 
+## 🛠️ Troubleshooting & Fixes (Latest Update)
+
+### 🧩 Letta SDK Issues
+If you see `[Letta] 'letta' package not installed — using SQLite fallback`, ensure you have the correct version. Version 0.1.0 on PyPI is sometimes empty. Use:
+```bash
+pip install "letta>=0.5.0,<0.6.0"
+```
+
+### 🔠 Windows Unicode Errors
+If scripts like `diagnose_env.py` or `check_letta.py` crash with `UnicodeEncodeError`, it's due to the terminal's character map (cp1252) not supporting emojis. We have updated the diagnostic scripts to use ASCII indicators (`[OK]`, `[ERROR]`) for compatibility.
+
+### 🧪 System Check
+Run the diagnostic to verify your setup:
+```bash
+python diagnose_env.py
+```
+
+
+---
+
 ## 🔐 Environment Variables
 
 | Variable | Required | Description |
@@ -355,24 +376,27 @@ FinClosePilot/
 
 ## 📊 Dashboard Preview
 
-The dashboard provides **14 tabs** across the full close workflow:
+The dashboard provides **14 specialised tabs** for a complete end-to-end financial close audit:
 
-| Tab | Shows |
-|-----|-------|
-| ⚡ Live Feed | Real-time WebSocket agent activity stream |
-| 🔄 Recon | GST + Bank + IC + Vendor match results |
-| 🔍 Anomalies | Heatmap + Benford's Law chart |
-| 🛡️ Guardrails | Fire log with regulation citations |
-| ⚠️ Escalations | Confidence-based review queue |
-| 💸 Cost | Model routing savings gauge |
-| 📊 Reports | GSTR-3B, Variance, Audit Committee |
-| 💰 Tax | Missed deductions + savings |
-| 🔎 Audit Query | Natural language audit trail search |
-| 🌐 Reg Monitor | CBIC/SEBI notification tracker |
-| 🧠 Learning | RLAIF scores + RLHF signals |
-| ⏱️ Predictive | Close timeline estimation |
-| 🏢 Entities | Multi-entity consolidation view |
-| 📄 Form 26AS | TDS + advance tax reconciliation |
+| Tab | Functionality |
+|-----|---------------|
+| ⚡ **Live Feed** | Real-time WebSocket stream of agent activity and reasoning logs. |
+| 🔄 **Recon** | Unified view for GST, Bank, Intercompany, and Vendor reconciliation matches. |
+| 🔍 **Anomalies** | Visual heatmap of risk areas + Benford’s Law first-digit distribution charts. |
+| 🛡️ **Guardrails** | Real-time log of regulatory fires (CGST, SEBI, IndAS) with specific section citations. |
+| ⚠️ **Escalations** | Confidence-based queue for items requiring human/CFO/Legal review. |
+| 💸 **Cost Efficiency** | Real-time tracking of Model-Routing savings and token usage analytics. |
+| 📊 **Reports** | Automated generation of GSTR-3B, Variance, and Audit Committee decks. |
+| 💰 **Tax Optimiser** | Identification of missing deductions (§35, §43B, §80JJAA) and GST ITC opportunities. |
+| 🔎 **Audit Query** | Natural language search interface for the entire SQLite audit trail. |
+| 🌐 **Reg Monitor** | Automated tracking of CBIC, SEBI, and MCA notification updates. |
+| 🧠 **Learning** | Dashboard for RLAIF quality scores and RLHF human correction signals. |
+| ⏱️ **Predictive ETA** | Time-series projection of when the close cycle will realistically complete. |
+| 🏢 **Multi-Entity** | Consolidated views and elimination entry management for group companies. |
+| 📄 **Form 26AS** | TDS and Advance Tax reconciliation against Income Tax department records. |
+
+### 👥 Multi-User & Manager Oversight
+Each close run is tracked against a specific `user_id`. Managers can drill down into any employee's run, review escalations, and provide final sign-off, ensuring a clear segregation of duties and a robust audit trail.
 
 ---
 

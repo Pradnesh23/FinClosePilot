@@ -290,8 +290,9 @@ async def load_demo(background_tasks: BackgroundTasks, current_user: User = Depe
 @router.get("/api/runs")
 async def get_runs(current_user: User = Depends(get_current_user)):
     """List pipeline runs based on role."""
-    is_manager = current_user.role == "MANAGER"
-    return {"runs": list_runs(user_id=current_user.id, is_manager=is_manager)}
+    # "My History" should always be personal, even for Managers.
+    # Managers have a separate "Team Oversight" tab.
+    return {"runs": list_runs(user_id=current_user.id, is_manager=False)}
 
 
 @router.get("/api/runs/{run_id}")

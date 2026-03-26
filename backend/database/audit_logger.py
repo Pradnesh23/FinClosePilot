@@ -159,12 +159,18 @@ def list_runs(user_id: int = None, is_manager: bool = False, limit: int = 50) ->
     """List pipeline runs, optionally filtered by user_id for Employees."""
     conn = get_db_connection()
     try:
-        if is_manager or user_id is None:
+        if is_manager and user_id is None:
+            # Global view for managers (if no user_id specified)
             query = "SELECT * FROM pipeline_runs ORDER BY created_at DESC LIMIT ?"
             params = (limit,)
-        else:
+        elif user_id is not None:
+            # Personal history (for both Employees and Managers)
             query = "SELECT * FROM pipeline_runs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?"
             params = (user_id, limit)
+        else:
+            # Fallback (non-manager, no user_id) - return empty or generic recent
+            query = "SELECT * FROM pipeline_runs ORDER BY created_at DESC LIMIT ?"
+            params = (limit,)
             
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
