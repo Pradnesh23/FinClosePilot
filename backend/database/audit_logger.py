@@ -1,8 +1,6 @@
-"""
-Audit logger — writes every agent action to SQLite audit_log table.
-"""
-
 import json
+import sqlite3
+from typing import List, Dict, Optional
 from datetime import datetime
 from backend.database.models import get_db_connection
 
@@ -11,9 +9,10 @@ def log_event(
     run_id: str,
     agent: str,
     action: str,
-    details: dict = None,
-    regulation: str = None,
-    confidence: float = None,
+    user_id: Optional[int] = None,
+    details: Optional[dict] = None,
+    regulation: Optional[str] = None,
+    confidence: Optional[float] = None,
     status: str = "INFO",
 ):
     """Log a pipeline event to the audit trail."""
@@ -22,11 +21,12 @@ def log_event(
         conn.execute(
             """
             INSERT INTO audit_log
-                (run_id, timestamp, agent, action, details, regulation, confidence, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (run_id, user_id, timestamp, agent, action, details, regulation, confidence, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
+                user_id,
                 datetime.utcnow().isoformat(),
                 agent,
                 action,
@@ -61,7 +61,7 @@ def get_audit_trail(run_id: str, limit: int = 200) -> list:
         conn.close()
 
 
-def create_run(run_id: str, period: str = "Q3FY26", source_files: list = None) -> None:
+def create_run(run_id: str, user_id: Optional[int] = None, period: str = "Q3FY26", source_files: Optional[list] = None) -> None:
     """Create or upsert a pipeline run record."""
     conn = get_db_connection()
     now = datetime.utcnow().isoformat()
@@ -69,11 +69,12 @@ def create_run(run_id: str, period: str = "Q3FY26", source_files: list = None) -
         conn.execute(
             """
             INSERT OR REPLACE INTO pipeline_runs
-                (run_id, created_at, updated_at, status, period, source_files)
-            VALUES (?, ?, ?, 'RUNNING', ?, ?)
+                (run_id, user_id, created_at, updated_at, status, period, source_files)
+            VALUES (?, ?, ?, ?, 'RUNNING', ?, ?)
             """,
             (
                 run_id,
+                user_id,
                 now,
                 now,
                 period,
@@ -112,20 +113,21 @@ def get_run(run_id: str) -> dict | None:
         conn.close()
 
 
-def save_transaction(run_id: str, txn: dict) -> None:
+def save_transaction(run_id: str, txn: dict, user_id: Optional[int] = None) -> None:
     """Save a normalised transaction."""
     conn = get_db_connection()
     try:
         conn.execute(
             """
             INSERT INTO transactions
-                (run_id, transaction_id, date, vendor_name, vendor_gstin,
+                (run_id, user_id, transaction_id, date, vendor_name, vendor_gstin,
                  invoice_no, amount, type, narration, gl_account, hsn_code,
                  gst_rate, igst, cgst, sgst, source, cost_centre, vendor_type, raw_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
+                user_id,
                 txn.get("id") or txn.get("transaction_id"),
                 txn.get("date"),
                 txn.get("vendor_canonical") or txn.get("vendor_name"),
@@ -153,32 +155,56 @@ def save_transaction(run_id: str, txn: dict) -> None:
         conn.close()
 
 
-def list_runs(limit: int = 50) -> list:
-    """List all pipeline runs, newest first."""
+def list_runs(user_id: int = None, is_manager: bool = False, limit: int = 50) -> list:
+    """List pipeline runs, optionally filtered by user_id for Employees."""
     conn = get_db_connection()
     try:
-        rows = conn.execute(
-            "SELECT * FROM pipeline_runs ORDER BY created_at DESC LIMIT ?", (limit,)
-        ).fetchall()
+        if is_manager or user_id is None:
+            query = "SELECT * FROM pipeline_runs ORDER BY created_at DESC LIMIT ?"
+            params = (limit,)
+        else:
+            query = "SELECT * FROM pipeline_runs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?"
+            params = (user_id, limit)
+            
+        rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
 
 
-def save_guardrail_fire(run_id: str, fire: dict) -> int:
+def list_team_runs(manager_id: int, limit: int = 50) -> list:
+    """List all runs from employees managed by this manager."""
+    conn = get_db_connection()
+    try:
+        query = """
+            SELECT pr.*, u.username as employee_name
+            FROM pipeline_runs pr
+            JOIN users u ON pr.user_id = u.id
+            WHERE u.manager_id = ?
+            ORDER BY pr.created_at DESC
+            LIMIT ?
+        """
+        rows = conn.execute(query, (manager_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def save_guardrail_fire(run_id: str, fire: dict, user_id: Optional[int] = None) -> int:
     """Save a guardrail fire and return its rowid."""
     conn = get_db_connection()
     try:
         cursor = conn.execute(
             """
             INSERT INTO guardrail_fires
-                (run_id, rule_id, rule_level, regulation, section,
+                (run_id, user_id, rule_id, rule_level, regulation, section,
                  vendor_name, vendor_gstin, transaction_id,
                  amount_inr, violation_detail, action_taken)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
+                user_id,
                 fire.get("rule_id"),
                 fire.get("rule_level"),
                 fire.get("regulation"),
@@ -197,21 +223,22 @@ def save_guardrail_fire(run_id: str, fire: dict) -> int:
         conn.close()
 
 
-def save_recon_break(run_id: str, brk: dict) -> None:
+def save_recon_break(run_id: str, brk: dict, user_id: Optional[int] = None) -> None:
     """Save a reconciliation break."""
     conn = get_db_connection()
     try:
         conn.execute(
             """
             INSERT INTO recon_breaks
-                (run_id, recon_type, break_category, vendor_name, vendor_gstin,
+                (run_id, user_id, recon_type, break_category, vendor_name, vendor_gstin,
                  transaction_id, amount, source_a_amount, source_b_amount,
                  difference, root_cause, auto_clearable, confidence,
                  regulation, ai_reasoning, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')
             """,
             (
                 run_id,
+                user_id,
                 brk.get("recon_type") or "GST",
                 brk.get("break_type") or brk.get("root_cause"),
                 brk.get("vendor_name"),
@@ -248,19 +275,20 @@ def get_guardrail_fires(run_id: str) -> list:
         conn.close()
 
 
-def save_anomaly(run_id: str, anomaly: dict) -> None:
+def save_anomaly(run_id: str, anomaly: dict, user_id: Optional[int] = None) -> None:
     """Save an anomaly finding."""
     conn = get_db_connection()
     try:
         conn.execute(
             """
             INSERT INTO anomalies
-                (run_id, anomaly_type, severity, vendor_name, vendor_gstin,
+                (run_id, user_id, anomaly_type, severity, vendor_name, vendor_gstin,
                  transaction_ids, financial_exposure_inr, p_value, chi_square, reasoning)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
+                user_id,
                 anomaly.get("anomaly_type"),
                 anomaly.get("severity"),
                 anomaly.get("vendor_name"),
@@ -277,19 +305,20 @@ def save_anomaly(run_id: str, anomaly: dict) -> None:
         conn.close()
 
 
-def save_rlhf_signal(run_id: str, signal: dict) -> None:
+def save_rlhf_signal(run_id: str, signal: dict, user_id: Optional[int] = None) -> None:
     """Save a human correction signal."""
     conn = get_db_connection()
     try:
         conn.execute(
             """
             INSERT INTO rlhf_signals
-                (run_id, timestamp, signal_type, original_output,
+                (run_id, user_id, timestamp, signal_type, original_output,
                  correction, correction_reason, corrected_by, guardrail_fire_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
+                user_id,
                 datetime.utcnow().isoformat(),
                 signal.get("signal_type"),
                 json.dumps(signal.get("original_output")),
@@ -304,18 +333,19 @@ def save_rlhf_signal(run_id: str, signal: dict) -> None:
         conn.close()
 
 
-def save_report(run_id: str, report_type: str, content: dict, critic_score: float = None) -> None:
+def save_report(run_id: str, report_type: str, content: dict, user_id: Optional[int] = None, critic_score: Optional[float] = None) -> None:
     """Save a generated report."""
     conn = get_db_connection()
     try:
         conn.execute(
             """
             INSERT INTO reports
-                (run_id, report_type, generated_at, content, critic_score)
-            VALUES (?, ?, ?, ?, ?)
+                (run_id, user_id, report_type, generated_at, content, critic_score)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
+                user_id,
                 report_type,
                 datetime.utcnow().isoformat(),
                 json.dumps(content),
@@ -388,19 +418,20 @@ def get_regulatory_changes(limit: int = 50) -> list:
 
 # ─── Escalation CRUD ──────────────────────────────────────────────────────────
 
-def log_escalation(record: dict) -> int:
+def log_escalation(record: dict, user_id: Optional[int] = None) -> int:
     """Save an escalation record, return its rowid."""
     conn = get_db_connection()
     try:
         cursor = conn.execute(
             """
             INSERT INTO escalations
-                (run_id, agent_type, item_id, reason_code, confidence,
+                (run_id, user_id, agent_type, item_id, reason_code, confidence,
                  threshold, item_json, escalation_level, resolved, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
             """,
             (
                 record.get("run_id"),
+                user_id,
                 record.get("agent_type"),
                 record.get("escalation_id") or record.get("item_id"),
                 record.get("reason_code"),
@@ -420,14 +451,18 @@ def log_escalation(record: dict) -> int:
         conn.close()
 
 
-def get_escalations(run_id: str) -> list:
-    """Get all escalations for a run."""
+def get_escalations(run_id: str, user_id: int = None) -> list:
+    """Get all escalations for a run, optionally filtered by user_id."""
     conn = get_db_connection()
     try:
-        rows = conn.execute(
-            "SELECT * FROM escalations WHERE run_id = ? ORDER BY id ASC",
-            (run_id,),
-        ).fetchall()
+        query = "SELECT * FROM escalations WHERE run_id = ?"
+        params = [run_id]
+        if user_id:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        query += " ORDER BY id ASC"
+        
+        rows = conn.execute(query, tuple(params)).fetchall()
         result = []
         for r in rows:
             d = dict(r)
@@ -441,12 +476,19 @@ def get_escalations(run_id: str) -> list:
         conn.close()
 
 
-def get_unresolved_escalations() -> list:
-    """Get all unresolved escalations across all runs."""
+def get_unresolved_escalations(user_id: Optional[int] = None) -> list:
+    """Get unresolved escalations, optionally filtered by user_id."""
     conn = get_db_connection()
     try:
+        where = "WHERE resolved = 0"
+        params = []
+        if user_id:
+            where += " AND user_id = ?"
+            params.append(user_id)
+            
         rows = conn.execute(
-            "SELECT * FROM escalations WHERE resolved = 0 ORDER BY created_at DESC"
+            f"SELECT * FROM escalations {where} ORDER BY created_at DESC",
+            tuple(params)
         ).fetchall()
         result = []
         for r in rows:
@@ -485,8 +527,8 @@ def resolve_escalation(escalation_id: int, resolved_by: str, resolution_note: st
 # ─── Model Usage Tracking ─────────────────────────────────────────────────────
 
 def log_model_usage(
-    run_id: str, task_type: str, model_used: str,
-    tokens_estimated: int = None, latency_ms: int = None
+    run_id: str, task_type: str, model_used: str, user_id: Optional[int] = None,
+    tokens_estimated: Optional[int] = None, latency_ms: Optional[int] = None
 ) -> None:
     """Log a model call for cost tracking."""
     conn = get_db_connection()
@@ -494,10 +536,10 @@ def log_model_usage(
         conn.execute(
             """
             INSERT INTO model_usage
-                (run_id, task_type, model_used, tokens_estimated, latency_ms, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (run_id, user_id, task_type, model_used, tokens_estimated, latency_ms, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_id, task_type, model_used, tokens_estimated, latency_ms,
+            (run_id, user_id, task_type, model_used, tokens_estimated, latency_ms,
              datetime.utcnow().isoformat()),
         )
         conn.commit()

@@ -15,17 +15,17 @@ You are a Tax Optimisation Agent for FinClosePilot India.
 Analyse the company's financial data and find LEGITIMATE tax saving opportunities.
 Focus on deductions and benefits the company may have missed.
 
-CHECK THESE SPECIFICALLY:
-
-Corporate Tax Deductions:
-- Section 80IC/80IE: manufacturing units in special areas (100% deduction)
+- Section 80JJAA: employment of new employees (30% deduction)
+- Section 43B: MSME payments (Section 43B(h) - 2024 amendment)
 - Section 35: R&D expenditure (150% deduction available)
-- Section 43B: payments to MSME vendors beyond 45 days (disallowance risk)
 - Section 40A(3): cash payments above Rs 10,000 (disallowance)
 
-GST Opportunities:
+GST Opportunities & Rules:
+- Rule 36(4): 5% provisional ITC on mismatched invoices
+- Rule 86B: 99% limit on utilizing ITC for high-turnover companies
+- Rule 42/43: Reversal of ITC for exempt supplies or personal use
 - Input tax credit on capital goods not yet claimed
-- Refund of accumulated ITC on exports
+- Refund of accumulated ITC on exports (LUT vs. IGST pay)
 - GST paid on advances but later adjusted (refund opportunity)
 
 Income Tax:
@@ -68,9 +68,13 @@ async def find_tax_opportunities(
 ) -> dict:
     """Find legitimate tax saving opportunities from transaction data."""
     user_msg = json.dumps({
-        "transactions_sample": transactions[:100],
+        "transactions_sample": transactions[:150],
         "gl_data_sample": gl_data[:50] if gl_data else [],
-        "context": context,
+        "context": {
+            **context,
+            "itc_available_in_books": sum(float(t.get("cgst", 0) + t.get("sgst", 0) + t.get("igst", 0)) for t in transactions),
+            "tax_laws_applied": ["Rule 36(4)", "Rule 86B", "Section 43B(h)", "Section 80JJAA"]
+        },
         "total_transactions": len(transactions),
     })
 

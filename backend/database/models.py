@@ -24,10 +24,25 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    # Users table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'EMPLOYEE', -- 'MANAGER' or 'EMPLOYEE'
+            manager_id INTEGER REFERENCES users(id), -- If EMPLOYEE, who is their manager?
+            created_at TEXT NOT NULL,
+            last_login TEXT
+        )
+    """)
+
     # Pipeline runs
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pipeline_runs (
             run_id TEXT PRIMARY KEY,
+            user_id INTEGER,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'PENDING',
@@ -45,15 +60,17 @@ def init_db():
             time_taken_seconds REAL DEFAULT 0,
             entities TEXT DEFAULT '[]',
             source_files TEXT DEFAULT '[]',
-            error TEXT
+            error TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
-    # Audit log — every agent action
+    # Audit log
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id TEXT NOT NULL,
+            user_id INTEGER,
             timestamp TEXT NOT NULL,
             agent TEXT NOT NULL,
             action TEXT NOT NULL,
@@ -61,15 +78,17 @@ def init_db():
             regulation TEXT,
             confidence REAL,
             status TEXT DEFAULT 'INFO',
-            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
-    # Transactions (normalised)
+    # Transactions
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id TEXT NOT NULL,
+            user_id INTEGER,
             transaction_id TEXT,
             date TEXT,
             vendor_name TEXT,
@@ -88,7 +107,8 @@ def init_db():
             cost_centre TEXT,
             vendor_type TEXT,
             raw_data TEXT,
-            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
@@ -97,6 +117,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS recon_breaks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id TEXT NOT NULL,
+            user_id INTEGER,
             recon_type TEXT NOT NULL,
             break_category TEXT,
             vendor_name TEXT,
@@ -112,7 +133,8 @@ def init_db():
             regulation TEXT,
             ai_reasoning TEXT,
             status TEXT DEFAULT 'OPEN',
-            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
@@ -121,6 +143,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS anomalies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id TEXT NOT NULL,
+            user_id INTEGER,
             anomaly_type TEXT NOT NULL,
             severity TEXT NOT NULL,
             vendor_name TEXT,
@@ -131,7 +154,8 @@ def init_db():
             chi_square REAL,
             reasoning TEXT,
             status TEXT DEFAULT 'OPEN',
-            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
@@ -140,6 +164,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS guardrail_fires (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id TEXT NOT NULL,
+            user_id INTEGER,
             rule_id TEXT NOT NULL,
             rule_level TEXT NOT NULL,
             regulation TEXT,
@@ -155,28 +180,32 @@ def init_db():
             override_by TEXT,
             override_at TEXT,
             telegram_sent INTEGER DEFAULT 0,
-            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
-    # Generated reports
+    # Reports
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id TEXT NOT NULL,
+            user_id INTEGER,
             report_type TEXT NOT NULL,
             generated_at TEXT NOT NULL,
             content TEXT NOT NULL,
             critic_score REAL,
-            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
-    # RLHF signals (human corrections)
+    # RLHF signals
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS rlhf_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id TEXT NOT NULL,
+            user_id INTEGER,
             timestamp TEXT NOT NULL,
             signal_type TEXT NOT NULL,
             original_output TEXT,
@@ -184,11 +213,12 @@ def init_db():
             correction_reason TEXT,
             corrected_by TEXT,
             guardrail_fire_id INTEGER,
-            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
-    # Regulatory changes
+    # Regulatory changes (System-wide)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS regulatory_changes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -206,23 +236,26 @@ def init_db():
         )
     """)
 
-    # Letta fallback store (when Letta server is down)
+    # Letta fallback store
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS letta_fallback (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
             agent_id TEXT NOT NULL,
             memory_type TEXT NOT NULL,
             label TEXT,
             content TEXT NOT NULL,
-            timestamp TEXT NOT NULL
+            timestamp TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
-    # Escalations (confidence-based human review)
+    # Escalations
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS escalations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id TEXT NOT NULL,
+            user_id INTEGER,
             agent_type TEXT NOT NULL,
             item_id TEXT,
             reason_code TEXT NOT NULL,
@@ -235,23 +268,45 @@ def init_db():
             resolved_at TEXT,
             resolution_note TEXT,
             created_at TEXT NOT NULL,
-            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id)
+            FOREIGN KEY (run_id) REFERENCES pipeline_runs(run_id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
-    # Model usage tracking (smart routing cost efficiency)
+    # Model usage tracking
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS model_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id TEXT,
+            user_id INTEGER,
             task_type TEXT NOT NULL,
             model_used TEXT NOT NULL,
             tokens_estimated INTEGER,
             latency_ms INTEGER,
-            timestamp TEXT NOT NULL
+            timestamp TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
+    # ─── Migration Logic (Add user_id to existing tables if missing) ───
+    tables_to_migrate = [
+        "pipeline_runs", "audit_log", "transactions", "recon_breaks",
+        "anomalies", "guardrail_fires", "reports", "rlhf_signals",
+        "letta_fallback", "escalations", "model_usage"
+    ]
+    for table in tables_to_migrate:
+        try:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER REFERENCES users(id)")
+        except sqlite3.OperationalError:
+            pass # Column already exists
+
+    # Also migrate users table to add manager_id if missing
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN manager_id INTEGER REFERENCES users(id)")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
-    print("[DB] All tables initialized.")
+    print("[DB] All tables initialized with Multi-User support.")
+

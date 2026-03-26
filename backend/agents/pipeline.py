@@ -17,6 +17,7 @@ from backend.agents.reconciliation.vendor_recon import run_vendor_reconciliation
 from backend.agents.anomaly.benford_analyser import analyse_benford
 from backend.agents.anomaly.duplicate_detector import detect_duplicates
 from backend.agents.anomaly.pattern_detector import detect_patterns
+from backend.agents.anomaly.statistical_detector import detect_statistical_anomalies
 from backend.agents.guardrails.gst_guardrails import check_gst_guardrails
 from backend.agents.guardrails.indas_guardrails import check_indas_guardrails
 from backend.agents.guardrails.sebi_guardrails import check_sebi_guardrails
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 class PipelineState(TypedDict, total=False):
     run_id: str
+    user_id: Optional[int]
     period: str
     raw_data: dict
     normalised_data: list
@@ -67,6 +69,8 @@ class PipelineState(TypedDict, total=False):
     retry_count: int
     start_time: float
     form26as_path: str | None
+    tester_name: str
+    tester_role: str
     error: str | None
 
 
@@ -83,24 +87,25 @@ async def _ws(state: PipelineState, event: str, agent: str, data: dict = None, s
 async def node_ingest(state: PipelineState) -> PipelineState:
     """INGESTING — normalise raw data."""
     run_id = state["run_id"]
+    user_id = state.get("user_id")
     t0 = asyncio.get_event_loop().time()
     await _ws(state, "INGESTING", "Data Ingestion Agent", {"message": "Normalising uploaded data..."})
-    db.log_event(run_id, "Normaliser", "START", {"source_count": len(state.get("raw_data", {}))})
+    db.log_event(run_id, "Normaliser", "START", user_id=user_id, details={"source_count": len(state.get("raw_data", {}))})
 
     raw = state.get("raw_data", {})
     results = []
     for source_type, text in raw.items():
         result = await normalise_data(str(text), source_type)
         results.extend(result.get("records", []))
-        db.log_event(run_id, "Normaliser", "NORMALISED",
-                     {"source": source_type, "records": len(result.get("records", []))})
+        db.log_event(run_id, "Normaliser", "NORMALISED", user_id=user_id,
+                     details={"source": source_type, "records": len(result.get("records", []))})
 
     state["normalised_data"] = results
     db.update_run(run_id, total_records=len(results), status="RECONCILING")
 
     # Save normalised transactions to DB
     for t in results:
-        db.save_transaction(run_id, t)
+        db.save_transaction(run_id, t, user_id=user_id)
 
     elapsed = asyncio.get_event_loop().time() - t0
     await store_close_duration(run_id, "INGESTING", int(elapsed), state["letta_client"], state["agent_id"])
@@ -120,6 +125,7 @@ async def node_ingest(state: PipelineState) -> PipelineState:
 async def node_reconcile(state: PipelineState) -> PipelineState:
     """RECONCILING — run all reconciliation agents in parallel where possible."""
     run_id = state["run_id"]
+    user_id = state.get("user_id")
     t0 = asyncio.get_event_loop().time()
     txns = state.get("normalised_data", [])
 
@@ -165,13 +171,13 @@ async def node_reconcile(state: PipelineState) -> PipelineState:
     # Save recon breaks to DB
     for brk in gst_r.get("breaks", []):
         brk["recon_type"] = "GST"
-        db.save_recon_break(run_id, brk)
+        db.save_recon_break(run_id, brk, user_id=user_id)
     for brk in bank_r.get("breaks", []):
         brk["recon_type"] = "BANK"
-        db.save_recon_break(run_id, brk)
+        db.save_recon_break(run_id, brk, user_id=user_id)
     for brk in vendor_r.get("breaks", []):
         brk["recon_type"] = "VENDOR"
-        db.save_recon_break(run_id, brk)
+        db.save_recon_break(run_id, brk, user_id=user_id)
 
     # Store structured recon summary for frontend
     await letta_mod.store_to_archival(state["letta_client"], state["agent_id"], state["recon_results"], label=f"recon_{run_id}")
@@ -187,24 +193,32 @@ async def node_reconcile(state: PipelineState) -> PipelineState:
 async def node_detect_anomalies(state: PipelineState) -> PipelineState:
     """DETECTING_ANOMALIES — Benford + Duplicates + Patterns."""
     run_id = state["run_id"]
+    user_id = state.get("user_id")
     t0 = asyncio.get_event_loop().time()
     txns = state.get("normalised_data", [])
 
     await _ws(state, "DETECTING_ANOMALIES", "Anomaly Detection Agents",
-              {"message": "Running Benford Law + Duplicate + Pattern analysis..."})
+              {"message": "Running Benford Law + Duplicate + Pattern + Statistical analysis..."})
 
-    benford, duplicates, patterns = await asyncio.gather(
+    benford, duplicates, patterns, statistical = await asyncio.gather(
         analyse_benford(txns, state["letta_client"], state["agent_id"], run_id),
         detect_duplicates(txns, state["letta_client"], state["agent_id"]),
         detect_patterns(txns, state["letta_client"], state["agent_id"]),
+        detect_statistical_anomalies(txns, state["letta_client"], state["agent_id"], run_id),
     )
 
-    state["anomalies"] = {"benford": benford, "duplicates": duplicates, "patterns": patterns}
+    state["anomalies"] = {
+        "benford": benford, 
+        "duplicates": duplicates, 
+        "patterns": patterns,
+        "statistical": statistical
+    }
 
     all_anomalies = (
         benford.get("violations", [])
         + duplicates.get("duplicates", [])
         + patterns.get("anomalies", [])
+        + statistical.get("violations", [])
     )
     total_anomalies = len(all_anomalies)
 
@@ -219,7 +233,7 @@ async def node_detect_anomalies(state: PipelineState) -> PipelineState:
 
     # Save anomalies to DB
     for a in all_anomalies:
-        db.save_anomaly(run_id, a)
+        db.save_anomaly(run_id, a, user_id=user_id)
 
     # Store structured anomaly summary for frontend heatmap/charts
     await letta_mod.store_to_archival(state["letta_client"], state["agent_id"], state["anomalies"], label=f"anomalies_{run_id}")
@@ -235,6 +249,7 @@ async def node_detect_anomalies(state: PipelineState) -> PipelineState:
 async def node_critic(state: PipelineState) -> PipelineState:
     """CRITIC_CHECK — RLAIF quality gate."""
     run_id = state["run_id"]
+    user_id = state.get("user_id")
     await _ws(state, "CRITIC_CHECK", "RLAIF Critic Agent",
               {"message": "Scoring output quality..."})
 
@@ -252,15 +267,15 @@ async def node_critic(state: PipelineState) -> PipelineState:
               {"decision": decision, "score": critic_result.get("overall_score")},
               status="DONE")
 
-    db.log_event(run_id, "RLAIF_Critic", "SCORED", {
+    db.log_event(run_id, "RLAIF_Critic", "SCORED", user_id=user_id, details={
         "decision": decision,
         "overall_score": critic_result.get("overall_score"),
         "retry_count": retry_count,
     })
 
-    if decision == "RETRY" and retry_count < 2:
-        state["retry_count"] = retry_count + 1
-        db.log_event(run_id, "RLAIF_Critic", "RETRY", {"attempt": retry_count + 1})
+    if decision == "RETRY" and int(retry_count or 0) < 2:
+        state["retry_count"] = int(retry_count or 0) + 1
+        db.log_event(run_id, "RLAIF_Critic", "RETRY", user_id=user_id, details={"attempt": int(state["retry_count"])})
         # Re-run — skip via flag (LangGraph conditional handles this)
     return state
 
@@ -268,6 +283,7 @@ async def node_critic(state: PipelineState) -> PipelineState:
 async def node_guardrails(state: PipelineState) -> PipelineState:
     """ENFORCING_GUARDRAILS — GST + IndAS + SEBI + RBI."""
     run_id = state["run_id"]
+    user_id = state.get("user_id")
     t0 = asyncio.get_event_loop().time()
     txns = state.get("normalised_data", [])
     context = {"quarter_end_date": "2025-12-31", "period": state.get("period", "Q3 FY26")}
@@ -315,6 +331,10 @@ async def node_guardrails(state: PipelineState) -> PipelineState:
         total_blocked_inr=total_blocked,
         status="GENERATING_REPORTS",
     )
+    
+    # Save fires to DB with user_id
+    for f in all_fires:
+        db.save_guardrail_fire(run_id, f, user_id=user_id)
 
     # Send Telegram alerts for hard blocks and critical anomalies
     telegram_sent = False
@@ -330,6 +350,8 @@ async def node_guardrails(state: PipelineState) -> PipelineState:
                 action_taken=fire.get("action_taken", "Blocked"),
                 run_id=run_id,
                 rule_level="HARD_BLOCK",
+                tester_name=state.get("tester_name", "Unknown"),
+                tester_role=state.get("tester_role", "USER"),
             )
             telegram_sent = True
 
@@ -343,6 +365,8 @@ async def node_guardrails(state: PipelineState) -> PipelineState:
                 financial_exposure_inr=anomaly.get("financial_exposure_inr", 0),
                 reasoning=anomaly.get("reasoning", ""),
                 run_id=run_id,
+                tester_name=state.get("tester_name", "Unknown"),
+                tester_role=state.get("tester_role", "USER"),
             )
             telegram_sent = True
 
@@ -359,6 +383,7 @@ async def node_guardrails(state: PipelineState) -> PipelineState:
 async def node_generate_reports(state: PipelineState) -> PipelineState:
     """GENERATING_REPORTS — GSTR-3B + Variance + Audit Committee + Tax Optimiser."""
     run_id = state["run_id"]
+    user_id = state.get("user_id")
     t0 = asyncio.get_event_loop().time()
     txns = state.get("normalised_data", [])
 
@@ -382,11 +407,12 @@ async def node_generate_reports(state: PipelineState) -> PipelineState:
     state["reports"] = {"gstr3b": gstr3b, "variance": variance, "audit_committee": audit}
     state["tax_opportunities"] = tax
 
-    # Save reports to DB
-    db.save_report(run_id, "gstr3b", gstr3b, state.get("critic_scores", {}).get("overall_score"))
-    db.save_report(run_id, "variance", variance)
-    db.save_report(run_id, "audit_committee", audit)
-    db.save_report(run_id, "tax_optimiser", tax)
+    # Save reports to DB with user_id
+    score = state.get("critic_scores", {}).get("overall_score")
+    db.save_report(run_id, "gstr3b", gstr3b, user_id=user_id, critic_score=score)
+    db.save_report(run_id, "variance", variance, user_id=user_id)
+    db.save_report(run_id, "audit_committee", audit, user_id=user_id)
+    db.save_report(run_id, "tax_optimiser", tax, user_id=user_id)
 
     elapsed = asyncio.get_event_loop().time() - t0
     await store_close_duration(run_id, "GENERATING_REPORTS", int(elapsed), state["letta_client"], state["agent_id"])
@@ -492,6 +518,8 @@ async def node_complete(state: PipelineState) -> PipelineState:
         time_taken_seconds=elapsed,
         total_blocked_inr=guardrail_results.get("total_blocked_inr", 0),
         period=state.get("period", "Q3 FY26"),
+        tester_name=state.get("tester_name", "Unknown"),
+        tester_role=state.get("tester_role", "USER"),
     )
 
     await _ws(state, final_status, "Pipeline", {
@@ -510,6 +538,9 @@ async def run_pipeline(
     form26as_path: str = None,
     letta_client_=None,
     agent_id: str = "",
+    user_id: Optional[int] = None,
+    tester_name: str = "Unknown",
+    tester_role: str = "USER",
 ) -> dict:
     """
     Main pipeline entry point.
@@ -519,8 +550,8 @@ async def run_pipeline(
         run_id = str(uuid.uuid4())
 
     init_db()
-    db.create_run(run_id, period)
-    db.log_event(run_id, "Pipeline", "START", {"period": period})
+    db.create_run(run_id, user_id=user_id, period=period)
+    db.log_event(run_id, "Pipeline", "START", user_id=user_id, details={"period": period})
 
     if letta_client_ is None:
         from backend.memory.letta_client import init_letta_client, create_or_get_agent
@@ -529,6 +560,9 @@ async def run_pipeline(
 
     state: PipelineState = {
         "run_id": run_id,
+        "user_id": user_id,
+        "tester_name": tester_name,
+        "tester_role": tester_role,
         "period": period,
         "raw_data": raw_data,
         "normalised_data": [],

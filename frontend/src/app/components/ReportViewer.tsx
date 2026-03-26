@@ -140,8 +140,27 @@ export function ReportViewer({ reports, runId }: ReportViewerProps) {
     a.click();
   };
 
-  const printReport = () => {
-    window.print();
+  const printReport = async () => {
+    if (!runId) return;
+    try {
+      // Direct link to the professional PDF generator endpoint
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/runs/${runId}/audit-package/pdf`, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (!response.ok) throw new Error("PDF generation failed");
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `FinClosePilot_Audit_${runId.slice(0, 8)}.pdf`;
+      a.click();
+    } catch (err) {
+      console.error(err);
+      window.print(); // Fallback to browser print if backend fails
+    }
   };
 
   return (

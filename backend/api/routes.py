@@ -11,11 +11,13 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks, HTTPException, Depends
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
+from backend.database import audit_logger
 from backend.database.audit_logger import (
     get_audit_trail, get_run, list_runs, get_report,
     get_guardrail_fires, get_regulatory_changes,
@@ -26,6 +28,10 @@ from backend.agents.reports.audit_packager import build_audit_package
 from backend.agents.additions.regulatory_monitor import run_regulatory_monitor
 from backend.agents.learning.rlhf_collector import collect_cfo_override
 from backend.api.websocket import manager
+from backend.api.auth import (
+    create_access_token, verify_password, get_password_hash,
+    get_user, get_user_by_email, get_current_user, Token, User, check_manager_role
+)
 from backend.memory.letta_client import (
     init_letta_client, create_or_get_agent, query_audit_trail,
     seed_past_period_data, get_archival_by_label, LettaClientWrapper,
@@ -61,7 +67,90 @@ class RLHFSignalRequest(BaseModel):
     run_id: str
     guardrail_fire_id: int
     override_reason: str
-    corrected_by: str = "CFO"
+    corrected_by: Optional[str] = "CFO"
+
+
+# ─── Authentication Routes ──────────────────────────────────────────────────
+@router.post("/api/auth/register", response_model=User)
+async def register(
+    username: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    role: str = Form("EMPLOYEE"),
+):
+    if get_user(username):
+        raise HTTPException(status_code=400, detail="Username already registered")
+    if get_user_by_email(email):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    hashed_pwd = get_password_hash(password)
+    now = datetime.utcnow().isoformat()
+    
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO users (username, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
+            (username, email, hashed_pwd, role, now)
+        )
+        user_id = cursor.lastrowid
+        conn.commit()
+        return User(
+            id=user_id,
+            username=username,
+            email=email,
+            role=role,
+            created_at=now
+        )
+    finally:
+        conn.close()
+
+
+@router.post("/api/auth/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    logger.info(f"[AUTH] Login attempt for user: {form_data.username}")
+    user_dict = get_user(form_data.username)
+    if not user_dict:
+        logger.warning(f"[AUTH] User not found: {form_data.username}")
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    
+    if not verify_password(form_data.password, user_dict["password_hash"]):
+        logger.warning(f"[AUTH] Password mismatch for user: {form_data.username}")
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    
+    logger.info(f"[AUTH] Login successful: {form_data.username}")
+    access_token = create_access_token(data={"sub": user_dict["username"]})
+    return Token(access_token=access_token, token_type="bearer")
+
+
+@router.get("/api/auth/me", response_model=User)
+async def read_users_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
+@router.get("/api/manager/team-runs")
+async def get_team_runs(current_user: User = Depends(check_manager_role)):
+    """Allow managers to see runs from their team."""
+    return audit_logger.list_team_runs(current_user.id)
+
+
+@router.get("/api/manager/team-datasets")
+async def get_team_datasets(current_user: User = Depends(check_manager_role)):
+    """Allow managers to see datasets used by their team."""
+    runs = audit_logger.list_team_runs(current_user.id)
+    datasets = []
+    seen = set()
+    for r in runs:
+        files = json.loads(r.get("source_files", "[]"))
+        for f in files:
+            if f not in seen:
+                datasets.append({
+                    "name": f,
+                    "employee": r.get("employee_name"),
+                    "run_id": r.get("run_id"),
+                    "timestamp": r.get("created_at")
+                })
+                seen.add(f)
+    return datasets
 
 
 class MultiEntityUpload(BaseModel):
@@ -77,6 +166,7 @@ async def upload_and_run(
     gst_portal: Optional[UploadFile] = File(None),
     form26as: Optional[UploadFile] = File(None),
     period: str = Form("Q3 FY26"),
+    current_user: User = Depends(get_current_user),
 ):
     """Accept file uploads and start the pipeline."""
     run_id = str(uuid.uuid4())
@@ -108,6 +198,9 @@ async def upload_and_run(
         form26as_path=form26as_path,
         letta_client_=lc,
         agent_id=ag,
+        user_id=current_user.id,
+        tester_name=current_user.username,
+        tester_role=current_user.role
     )
 
     return {"run_id": run_id, "status": "STARTED", "period": period}
@@ -117,6 +210,7 @@ async def upload_and_run(
 async def upload_multi_entity(
     background_tasks: BackgroundTasks,
     payload: dict,
+    current_user: User = Depends(get_current_user),
 ):
     """Accept multi-entity data and start group close pipeline."""
     run_id = str(uuid.uuid4())
@@ -124,6 +218,9 @@ async def upload_multi_entity(
     period = payload.get("period", "Q3 FY26")
     lc, ag = get_letta()
     ws_cb = manager.make_callback(run_id)
+    
+    # Init run in DB
+    audit_logger.create_run(run_id, user_id=current_user.id, period=period)
 
     background_tasks.add_task(
         run_pipeline,
@@ -134,13 +231,16 @@ async def upload_multi_entity(
         entities=entities,
         letta_client_=lc,
         agent_id=ag,
+        user_id=current_user.id,
+        tester_name=current_user.username,
+        tester_role=current_user.role
     )
     return {"run_id": run_id, "status": "STARTED", "entities": len(entities)}
 
 
 # ─── Demo Mode ──────────────────────────────────────────────────────────────
 @router.get("/api/demo/load")
-async def load_demo(background_tasks: BackgroundTasks):
+async def load_demo(background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
     """Load demo dataset and start the pipeline."""
     demo_path = Path("./data/demo")
     raw_data = {}
@@ -164,6 +264,10 @@ async def load_demo(background_tasks: BackgroundTasks):
 
     run_id = str(uuid.uuid4())
     lc, ag = get_letta()
+    
+    # Init run in DB (Fixes 'Run not found' 404)
+    audit_logger.create_run(run_id, user_id=current_user.id, period="Q3 FY26")
+
     ws_cb = manager.make_callback(run_id)
 
     background_tasks.add_task(
@@ -174,6 +278,9 @@ async def load_demo(background_tasks: BackgroundTasks):
         ws_callback=ws_cb,
         letta_client_=lc,
         agent_id=ag,
+        user_id=current_user.id,
+        tester_name=current_user.username,
+        tester_role=current_user.role
     )
 
     return {"run_id": run_id, "status": "STARTED", "demo": True, "period": "Q3 FY26"}
@@ -181,17 +288,22 @@ async def load_demo(background_tasks: BackgroundTasks):
 
 # ─── Run Results ─────────────────────────────────────────────────────────────
 @router.get("/api/runs")
-async def get_runs():
-    """List all pipeline runs."""
-    return {"runs": list_runs()}
+async def get_runs(current_user: User = Depends(get_current_user)):
+    """List pipeline runs based on role."""
+    is_manager = current_user.role == "MANAGER"
+    return {"runs": list_runs(user_id=current_user.id, is_manager=is_manager)}
 
 
 @router.get("/api/runs/{run_id}")
-async def get_run_result(run_id: str):
-    """Full results for a run."""
+async def get_run_result(run_id: str, current_user: User = Depends(get_current_user)):
+    """Full results for a run, protected by user scoping."""
     run = get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
+        
+    # Permission Check
+    if current_user.role != "MANAGER" and run.get("user_id") != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this run history")
 
     audit_trail = get_audit_trail(run_id, limit=50)
     guardrail_fires = get_guardrail_fires(run_id)
@@ -239,8 +351,12 @@ async def get_specific_report(run_id: str, report_type: str):
 
 
 @router.get("/api/runs/{run_id}/audit-package")
-async def get_audit_package(run_id: str):
+async def get_audit_package(run_id: str, current_user: User = Depends(get_current_user)):
     """Build and return complete audit package."""
+    run = get_run(run_id)
+    if not run or (current_user.role != "MANAGER" and run.get("user_id") != current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
     try:
         package = await build_audit_package(run_id)
         return package
@@ -248,9 +364,33 @@ async def get_audit_package(run_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/api/runs/{run_id}/audit-package/pdf")
+async def download_audit_package_pdf(run_id: str, current_user: User = Depends(get_current_user)):
+    """Generate and return audit package as PDF."""
+    from fastapi.responses import FileResponse
+    from backend.utils.pdf_generator import generate_audit_report_pdf
+    
+    run = get_run(run_id)
+    if not run or (current_user.role != "MANAGER" and run.get("user_id") != current_user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    try:
+        package = await build_audit_package(run_id)
+        pdf_path = f"/tmp/audit_report_{run_id}.pdf"
+        generate_audit_report_pdf(package, pdf_path)
+        return FileResponse(
+            path=pdf_path, 
+            filename=f"FinClosePilot_Audit_{run_id[:8]}.pdf",
+            media_type="application/pdf"
+        )
+    except Exception as e:
+        logger.error(f"PDF generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ─── Audit Query ─────────────────────────────────────────────────────────────
 @router.post("/api/audit/query")
-async def audit_query(req: AuditQueryRequest):
+async def audit_query(req: AuditQueryRequest, current_user: User = Depends(get_current_user)):
     """Natural language audit trail query with synthesized answer."""
     from backend.agents.model_router import route_call
     
@@ -267,10 +407,10 @@ async def audit_query(req: AuditQueryRequest):
         keyword = req.question.lower()
         relevant = [
             e for e in db_trail
-            if any(k in (e.get("action", "") + e.get("agent", "") + str(e.get("details", ""))).lower()
+            if any(k in (str(e.get("action", "")) + str(e.get("agent", "")) + str(e.get("details", ""))).lower()
                    for k in keyword.split())
         ]
-        results = relevant[:15] + results[:5]
+        results = relevant[:15] + results
 
     # Synthesize an answer if we have results
     answer = "No relevant audit records found to answer this specific question."
@@ -280,7 +420,12 @@ async def audit_query(req: AuditQueryRequest):
             for r in results[:10]
         ])
         
-        system_prompt = "You are a senior auditor. Answer the user's question concisely based ONLY on the provided audit trail logs. If the answer isn't there, say you don't know."
+        system_prompt = (
+            "You are a senior auditor for FinClosePilot. Your task is to answer the user's question "
+            "based onto the provided audit trail logs. Be specific and citation-heavy. "
+            "If the answer involves transaction amounts, vendors, or specific agents, mention them. "
+            "If the logs don't contain enough info to answer fully, state what is present and what is missing."
+        )
         user_message = f"Audit Trail Context:\n{context}\n\nQuestion: {req.question}"
         
         try:
@@ -300,7 +445,7 @@ async def audit_query(req: AuditQueryRequest):
 
 # ─── RLHF Signal ─────────────────────────────────────────────────────────────
 @router.post("/api/rlhf/signal")
-async def rlhf_signal(req: RLHFSignalRequest):
+async def rlhf_signal(req: RLHFSignalRequest, current_user: User = Depends(get_current_user)):
     """Human correction signal — CFO override of a SOFT_FLAG."""
     lc, ag = get_letta()
 
@@ -324,7 +469,7 @@ async def rlhf_signal(req: RLHFSignalRequest):
 
 # ─── Regulatory Monitor ──────────────────────────────────────────────────────
 @router.get("/api/regulatory/check")
-async def trigger_regulatory_check(background_tasks: BackgroundTasks):
+async def trigger_regulatory_check(background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
     """Trigger on-demand regulatory rules check."""
     lc, ag = get_letta()
     background_tasks.add_task(run_regulatory_monitor, lc, ag)
@@ -332,9 +477,41 @@ async def trigger_regulatory_check(background_tasks: BackgroundTasks):
 
 
 @router.get("/api/regulatory/updates")
-async def get_regulatory_updates():
-    """List all known regulatory updates from database."""
+async def get_regulatory_updates(current_user: User = Depends(get_current_user)):
+    """List all known regulatory updates from database. Seeds mock data if empty."""
     changes = get_regulatory_changes(limit=50)
+    
+    if not changes:
+        # Seed some helpful demo changes for the USER
+        from backend.agents.additions.regulatory_monitor import save_regulatory_change
+        mock_changes = [
+            {
+                "framework": "GST",
+                "notification_no": "Notif 01/2024-Central Tax",
+                "summary": "Mandatory e-invoice for small businesses.",
+                "what_changed": "Threshold for e-invoicing reduced to Rs 5 Crore.",
+                "effective_date": "2024-04-01",
+                "affected_areas": ["Compliance", "IT Systems"],
+                "action_required": "Ensure ERP is updated to generate e-invoices.",
+                "urgency": "HIGH",
+                "source_url": "https://cbic.gov.in"
+            },
+            {
+                "framework": "IncomeTax",
+                "notification_no": "Section 43B(h)",
+                "summary": "New rule for MSME payments.",
+                "what_changed": "Payments to MSMEs must be made within 45 days to claim deduction.",
+                "effective_date": "2024-04-01",
+                "affected_areas": ["Accounts Payable", "Tax Deduction"],
+                "action_required": "Audit vendor list for MSME status.",
+                "urgency": "HIGH",
+                "source_url": "https://incometaxindia.gov.in"
+            }
+        ]
+        for c in mock_changes:
+            save_regulatory_change(c)
+        changes = get_regulatory_changes(limit=50)
+
     return {"changes": changes, "count": len(changes)}
 
 
@@ -346,7 +523,7 @@ class EscalationResolveRequest(BaseModel):
 
 
 @router.get("/api/escalations/{run_id}")
-async def get_escalations_api(run_id: str, resolved: Optional[bool] = None):
+async def get_escalations_api(run_id: str, resolved: Optional[bool] = None, current_user: User = Depends(get_current_user)):
     """Get all escalations for a run, optionally filtered by resolved status."""
     from backend.database.audit_logger import get_escalations, get_unresolved_escalations
     if resolved is False:
@@ -357,7 +534,7 @@ async def get_escalations_api(run_id: str, resolved: Optional[bool] = None):
 
 
 @router.post("/api/escalations/resolve")
-async def resolve_escalation_api(req: EscalationResolveRequest):
+async def resolve_escalation_api(req: EscalationResolveRequest, current_user: User = Depends(get_current_user)):
     """Resolve an escalation (CFO/human decision)."""
     from backend.database.audit_logger import resolve_escalation
     success = resolve_escalation(req.escalation_id, req.resolved_by, req.resolution_notes)
@@ -368,7 +545,7 @@ async def resolve_escalation_api(req: EscalationResolveRequest):
 
 # ─── PHASE 2: Cost Efficiency ───────────────────────────────────────────────
 @router.get("/api/cost-efficiency/{run_id}")
-async def get_cost_efficiency(run_id: str):
+async def get_cost_efficiency(run_id: str, current_user: User = Depends(get_current_user)):
     """Get model routing cost efficiency stats for a run."""
     from backend.agents.model_router import get_routing_stats
     from backend.database.audit_logger import get_model_usage_stats
@@ -383,7 +560,7 @@ async def get_cost_efficiency(run_id: str):
 
 # ─── PHASE 2: Surprise Scenarios ────────────────────────────────────────────
 @router.post("/api/surprise/{scenario_type}")
-async def trigger_surprise(scenario_type: str, background_tasks: BackgroundTasks):
+async def trigger_surprise(scenario_type: str, background_tasks: BackgroundTasks, current_user: User = Depends(get_current_user)):
     """Trigger a pre-built surprise scenario for live demo."""
     from backend.agents.surprise_handler import (
         detect_surprise_scenario, handle_out_of_scope, handle_rule_conflict,
@@ -431,7 +608,7 @@ async def trigger_surprise(scenario_type: str, background_tasks: BackgroundTasks
 
 # ─── Tax Opportunities ───────────────────────────────────────────────────────
 @router.get("/api/tax/opportunities/{run_id}")
-async def get_tax_opportunities(run_id: str):
+async def get_tax_opportunities(run_id: str, current_user: User = Depends(get_current_user)):
     """Get tax optimisation findings for a run."""
     r = get_report(run_id, "tax_optimiser")
     if not r:
@@ -441,7 +618,7 @@ async def get_tax_opportunities(run_id: str):
 
 # ─── Multi-Entity Status ─────────────────────────────────────────────────────
 @router.get("/api/entities/status")
-async def entities_status():
+async def entities_status(current_user: User = Depends(get_current_user)):
     """Get multi-entity close status from all runs."""
     runs = list_runs(limit=20)
     return {"entities": [], "runs": runs[:5]}
@@ -449,7 +626,7 @@ async def entities_status():
 
 # ─── Predictive Timeline ─────────────────────────────────────────────────────
 @router.get("/api/prediction/{run_id}")
-async def get_prediction(run_id: str):
+async def get_prediction(run_id: str, current_user: User = Depends(get_current_user)):
     """Get current predictive timeline for a run."""
     run = get_run(run_id)
     if not run:

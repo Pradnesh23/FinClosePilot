@@ -11,6 +11,7 @@ from backend.agents.confidence import (
     check_confidence, escalate, partial_proceed, CONFIDENCE_THRESHOLDS,
 )
 from backend.memory import letta_client as letta
+from rapidfuzz import process, fuzz, utils
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,47 @@ def _is_valid_gstin(gstin: str) -> bool:
     return bool(gstin and GSTIN_REGEX.match(gstin.strip().upper()))
 
 
+def _fuzzy_match_txns(books: list, server_data: list, threshold=90):
+    """
+    Perform deterministic + fuzzy matching to identify matched pairs 
+    and residual 'breaks' before LLM processing.
+    """
+    matched = []
+    books_unmatched = books.copy()
+    server_unmatched = server_data.copy()
+    
+    # 1. Exact Match (Invoice No + Amount)
+    for b in books[:]:
+        for s in server_data[:]:
+            if b.get("invoice_no") == s.get("invoice_no") and abs(float(b.get("amount", 0)) - float(s.get("amount", 0))) < 1:
+                if b in books_unmatched and s in server_unmatched:
+                    matched.append((b, s))
+                    books_unmatched.remove(b)
+                    server_unmatched.remove(s)
+                    break
+                    
+    # 2. Fuzzy Match (Invoice No ~ ~ + Amount)
+    for b in books_unmatched[:]:
+        if not b.get("invoice_no"): continue
+        # Find best invoice_no match in server_unmatched
+        choices = [s.get("invoice_no", "") for s in server_unmatched]
+        if not choices: break
+        
+        best_match = process.extractOne(b["invoice_no"], choices, scorer=fuzz.ratio, processor=utils.default_process)
+        if best_match and best_match[1] >= threshold:
+            match_idx = choices.index(best_match[0])
+            s = server_unmatched[match_idx]
+            # Verify amount is close (within 1%)
+            b_amt = float(b.get("amount", 0))
+            s_amt = float(s.get("amount", 0))
+            if b_amt > 0 and abs(b_amt - s_amt) / b_amt < 0.01:
+                matched.append((b, s))
+                books_unmatched.remove(b)
+                server_unmatched.remove(s)
+    
+    return matched, books_unmatched, server_unmatched
+
+
 async def run_gst_reconciliation(
     gstr1: list,
     gstr3b: list,
@@ -83,21 +125,29 @@ async def run_gst_reconciliation(
     run_id: str = "demo",
 ) -> dict:
     """Run full GST reconciliation across all 4 data sources."""
+    
+    # Pre-pass: Fuzzy match Books vs GSTR-2A (Purchase side)
+    matched_2a, books_rem, gstr2a_rem = _fuzzy_match_txns(books, gstr2a)
+    
     user_msg = json.dumps({
-        "gstr1_sample": gstr1[:50],
-        "gstr3b_sample": gstr3b[:50],
-        "gstr2a_sample": gstr2a[:50],
-        "books_sample": books[:50],
+        "matched_deterministic_count": len(matched_2a),
+        "books_unmatched_sample": books_rem[:30],
+        "gstr2a_unmatched_sample": gstr2a_rem[:30],
+        "gstr1_sample": gstr1[:30],
+        "gstr3b_sample": gstr3b[:30],
         "gstr1_count": len(gstr1),
         "gstr3b_count": len(gstr3b),
-        "gstr2a_count": len(gstr2a),
-        "books_count": len(books),
+        "gstr2a_total_count": len(gstr2a),
+        "books_total_count": len(books),
     })
 
     escalations = []
 
     try:
         result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
+        
+        # Inject deterministic matches back into result count
+        result["matched_count"] = result.get("matched_count", 0) + len(matched_2a)
 
         # ── Confidence check on overall result ──
         conf_result = check_confidence(result, "reconciliation_root_cause")

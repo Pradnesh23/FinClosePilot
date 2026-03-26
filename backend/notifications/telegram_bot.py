@@ -41,6 +41,16 @@ def _level_emoji(rule_level: str) -> str:
     return mapping.get(rule_level, "🔔")
 
 
+def _escape_markdown(text: str) -> str:
+    """Escapes special characters for Telegram Markdown (V1)."""
+    if not isinstance(text, str):
+        return str(text)
+    # Characters that need escaping in MarkdownV1: _ * ` [
+    for char in ["_", "*", "`", "["]:
+        text = text.replace(char, f"\\{char}")
+    return text
+
+
 async def send_guardrail_alert(
     rule_id: str,
     regulation: str,
@@ -51,6 +61,8 @@ async def send_guardrail_alert(
     action_taken: str,
     run_id: str,
     rule_level: str = "SOFT_FLAG",
+    tester_name: str = "Unknown",
+    tester_role: str = "USER",
 ) -> bool:
     """Send formatted Telegram message when a guardrail fires."""
     if not _bot_available:
@@ -59,13 +71,19 @@ async def send_guardrail_alert(
 
     emoji = _level_emoji(rule_level)
     label = rule_level.replace("_", " ")
+    
+    e_tester = _escape_markdown(tester_name)
+    e_role = _escape_markdown(tester_role)
+    e_vendor = _escape_markdown(vendor_name)
+    e_section = _escape_markdown(section)
 
     message = (
         f"{emoji} *{label} — FinClosePilot Alert*\n\n"
-        f"*Vendor:* {vendor_name}\n"
+        f"*Tester:* {e_tester} ({e_role})\n"
+        f"*Vendor:* {e_vendor}\n"
         f"*Amount:* Rs {_format_inr(amount_inr)}\n"
         f"*Rule:* {regulation}\n"
-        f"*Section:* {section}\n"
+        f"*Section:* {e_section}\n"
         f"*Issue:* {violation_detail}\n\n"
         f"*Action taken:* {action_taken}\n"
         f"*Run ID:* `{run_id}`\n\n"
@@ -82,6 +100,8 @@ async def send_anomaly_alert(
     financial_exposure_inr: float,
     reasoning: str,
     run_id: str,
+    tester_name: str = "Unknown",
+    tester_role: str = "USER",
 ) -> bool:
     """Send Telegram message when CRITICAL or HIGH anomaly is detected."""
     if not _bot_available:
@@ -91,10 +111,16 @@ async def send_anomaly_alert(
     if severity not in ("CRITICAL", "HIGH"):
         return False
 
+    e_tester = _escape_markdown(tester_name)
+    e_role = _escape_markdown(tester_role)
+    e_vendor = _escape_markdown(vendor_name)
+    e_cat = _escape_markdown(category)
+
     message = (
         f"🚨 *{severity} ANOMALY — FinClosePilot*\n\n"
-        f"*Type:* {category}\n"
-        f"*Vendor:* {vendor_name}\n"
+        f"*Tester:* {e_tester} ({e_role})\n"
+        f"*Type:* {e_cat}\n"
+        f"*Vendor:* {e_vendor}\n"
         f"*Exposure:* Rs {_format_inr(financial_exposure_inr)}\n"
         f"*Finding:* {reasoning[:300]}\n\n"
         f"/review\\_{run_id}"
@@ -112,6 +138,8 @@ async def send_pipeline_complete(
     time_taken_seconds: float,
     total_blocked_inr: float,
     period: str = "Q3 FY26",
+    tester_name: str = "Unknown",
+    tester_role: str = "USER",
 ) -> bool:
     """Send summary message when full pipeline completes."""
     if not _bot_available:
@@ -122,9 +150,14 @@ async def send_pipeline_complete(
     seconds = int(time_taken_seconds % 60)
     time_str = f"{minutes}m {seconds}s"
 
+    e_tester = _escape_markdown(tester_name)
+    e_role = _escape_markdown(tester_role)
+    e_period = _escape_markdown(period)
+
     message = (
         f"✅ *Financial Close Complete — FinClosePilot*\n\n"
-        f"*Period:* {period}\n"
+        f"*Tester:* {e_tester} ({e_role})\n"
+        f"*Period:* {e_period}\n"
         f"*Time taken:* {time_str}\n"
         f"*Records:* {matched:,} matched | {breaks} breaks\n"
         f"*Anomalies:* {anomalies} found\n"

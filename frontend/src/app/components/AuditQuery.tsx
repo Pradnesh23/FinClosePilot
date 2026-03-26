@@ -71,12 +71,14 @@ export function AuditQuery({ runId }: { runId?: string }) {
       {error && <p className="text-sm text-red-400 bg-red-500/10 rounded-xl px-4 py-3 border border-red-500/20">{error}</p>}
 
       {answer && (
-        <div className="p-4 rounded-xl bg-indigo-600/10 border border-indigo-500/20 space-y-2 animate-in slide-in-from-top-2 duration-500">
-          <div className="flex items-center gap-2 text-indigo-400 font-bold text-[10px] uppercase tracking-widest">
-            <MessageSquare className="w-3.5 h-3.5" />
-            Auditor Summary
+        <div className="p-5 rounded-2xl bg-indigo-600/10 border border-indigo-500/30 space-y-3 animate-in fade-in slide-in-from-top-4 duration-700 shadow-2xl shadow-indigo-500/10">
+          <div className="flex items-center gap-2 text-indigo-400 font-black text-[11px] uppercase tracking-[0.2em]">
+            <div className="p-1 bg-indigo-500/20 rounded-md">
+              <MessageSquare className="w-3.5 h-3.5" />
+            </div>
+            AI Audit Synthesis
           </div>
-          <p className="text-sm text-white leading-relaxed">{answer}</p>
+          <p className="text-[13px] text-white/90 leading-relaxed font-medium">{answer}</p>
         </div>
       )}
 
