@@ -1,57 +1,121 @@
 """
-LLM-based pattern anomaly classifier.
-Identifies additional patterns like round number clustering, MSME risks, etc.
+Pattern Anomaly Detector — Deterministic Heuristics + AI Enhancement.
+Identifies round numbers, MSME risks, threshold avoidance, etc.
 """
 
 import logging
 import json
+from datetime import datetime
 from backend.agents.gemini_helper import call_gemini_json # type: ignore
 from backend.memory import letta_client as letta # type: ignore
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """
-You are an Anomaly Pattern Classifier for FinClosePilot, India.
+def _parse_date(date_str: str):
+    """Parse date string to datetime."""
+    if not date_str: return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d-%b-%Y"):
+        try:
+            return datetime.strptime(str(date_str), fmt)
+        except ValueError:
+            continue
+    return None
 
-Analyse the list of transactions and identify these specific anomalies:
+def _run_deterministic_patterns(transactions: list) -> list:
+    """Run algorithmic pattern detection heuristics."""
+    anomalies = []
+    
+    for txn in transactions:
+        amount = float(txn.get("amount", 0))
+        narration = (txn.get("narration") or "").lower()
+        txn_id = txn.get("id") or txn.get("transaction_id")
+        vendor = txn.get("vendor_name") or "Unknown"
 
-1. ROUND_NUMBER_CLUSTER: Multiple payments of exact round amounts (e.g. Rs 5,00,000)
-   to avoid transaction limits or reporting thresholds.
-2. MSME_OVERDUE: Invoices from MSME vendors unpaid beyond 45 days
-   (Section 43B disallowance risk — Income Tax Act).
-3. YEAR_END_SPIKE: Unusual spike in bookings just before financial year end (March 31)
-   that may indicate earnings management.
-4. RELATED_PARTY: Transactions with vendors that may be related parties (similar names,
-   addresses) not disclosed per SEBI LODR Regulation 23.
-5. THRESHOLD_AVOIDANCE: Cash payments just below Rs 10,000 threshold (Section 40A(3)).
-6. NON_BUSINESS_HOURS: High-value transactions on weekends or odd hours.
+        # 1. ROUND_NUMBER_CLUSTER
+        if amount >= 10000 and amount % 1000 == 0:
+            anomalies.append({
+                "anomaly_type": "ROUND_NUMBER_CLUSTER",
+                "severity": "MEDIUM",
+                "vendor_name": vendor,
+                "transaction_ids": [txn_id],
+                "financial_exposure_inr": amount,
+                "regulation": "General Audit Principles",
+                "reasoning": f"Exact round amount Rs {amount:,.0f} detected. Possible simplified billing or threshold evasion."
+            })
 
-For each anomaly found provide:
-- Category from above list
-- Severity: CRITICAL|HIGH|MEDIUM|LOW
-- Affected vendors/transactions
-- Financial exposure in Rs
-- Regulation reference
-- Recommended action
+        # 2. THRESHOLD_AVOIDANCE (Section 40A(3) - Rs 10,000)
+        if 9500 <= amount < 10000:
+            anomalies.append({
+                "anomaly_type": "THRESHOLD_AVOIDANCE",
+                "severity": "HIGH",
+                "vendor_name": vendor,
+                "transaction_ids": [txn_id],
+                "financial_exposure_inr": amount,
+                "regulation": "Income Tax Act Section 40A(3)",
+                "reasoning": f"Amount Rs {amount:,.0f} is suspiciously close to the Rs 10,000 cash payment limit."
+            })
 
-Return ONLY valid JSON:
-{
-  "anomalies": [{
-    "anomaly_type": "string",
-    "severity": "CRITICAL|HIGH|MEDIUM|LOW",
-    "vendor_name": "string",
-    "vendor_gstin": "string or null",
-    "transaction_ids": ["string"],
-    "financial_exposure_inr": float,
-    "count": int,
-    "regulation": "string",
-    "reasoning": "string",
-    "action_required": "string"
-  }],
-  "total_exposure_inr": float,
-  "summary": "string"
-}
-"""
+        # 3. NON_BUSINESS_HOURS (Weekends)
+        dt = _parse_date(txn.get("date"))
+        if dt and dt.weekday() >= 5:
+            anomalies.append({
+                "anomaly_type": "NON_BUSINESS_HOURS",
+                "severity": "LOW",
+                "vendor_name": vendor,
+                "transaction_ids": [txn_id],
+                "financial_exposure_inr": amount,
+                "regulation": "Internal Control Standards",
+                "reasoning": f"Transaction processed on {dt.strftime('%A')}. Unusual for business operations."
+            })
+
+    return anomalies
+
+
+async def _enhance_patterns_with_ai(
+    transactions: list,
+    detected_anomalies: list,
+    agent_id: str,
+    letta_client,
+) -> dict:
+    """Use AI to discover complex patterns and verify deterministic flags."""
+    system_prompt = """
+    You are a Forensic Accounting Expert specializing in Indian corporate patterns.
+    We have used algorithms to detect round numbers and threshold avoidance.
+    
+    Your task:
+    1. Verify the 'detected_anomalies'. Are they genuine risks or benign (e.g., standard monthly rent)?
+    2. Discover NEW patterns:
+       - YEAR_END_SPIKE: Are there unusual high-value bookings in late March?
+       - MSME_OVERDUE: Do any transactions suggest overdue payments (>45 days) to MSMEs?
+       - RELATED_PARTY: Do any vendors look like undisclosed related parties?
+    
+    Return ONLY valid JSON:
+    {
+      "enhanced_anomalies": [{
+        "anomaly_type": "string",
+        "severity": "CRITICAL|HIGH|MEDIUM|LOW",
+        "vendor_name": "string",
+        "transaction_ids": ["string"],
+        "financial_exposure_inr": float,
+        "regulation": "string",
+        "reasoning": "string",
+        "status": "CONFIRMED|FalsePositive|NEW_DETECTION"
+      }],
+      "summary": "string"
+    }
+    """
+    
+    user_msg = json.dumps({
+        "detected_anomalies": detected_anomalies,
+        "transactions_sample": [{k: v for k, v in t.items() if k not in ["letta_id", "id"]} for t in transactions[:40]],
+    })
+    
+    try:
+        result = await call_gemini_json(system_prompt, user_msg)
+        return result
+    except Exception as e:
+        logger.error(f"[PatternDetector] AI Enhancement failed: {e}")
+        return {"enhanced_anomalies": [], "summary": "AI enhancement failed."}
 
 
 async def detect_patterns(
@@ -59,23 +123,41 @@ async def detect_patterns(
     letta_client,
     agent_id: str,
 ) -> dict:
-    """Detect anomaly patterns using Gemini classification."""
-    user_msg = json.dumps({
-        "transactions": transactions[:200], # type: ignore
-        "total_count": len(transactions),
-    })
-
-    try:
-        result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
-        for anomaly in result.get("anomalies", []):
-            await letta.store_to_archival(letta_client, agent_id, {
-                "type": "pattern_anomaly",
-                **anomaly,
-            })
-        return result
-    except Exception as e:
-        logger.error(f"[PatternDetector] Failed: {e}")
-        return {
-            "anomalies": [], "total_exposure_inr": 0,
-            "summary": f"Pattern detection failed: {str(e)}",
-        }
+    """Detect anomaly patterns using hybrid approach."""
+    # 1. Deterministic Heuristics
+    initial_anomalies = _run_deterministic_patterns(transactions)
+    
+    # 2. AI Enhancement
+    ai_result = await _enhance_patterns_with_ai(transactions, initial_anomalies, agent_id, letta_client)
+    
+    final_anomalies = []
+    enhanced = ai_result.get("enhanced_anomalies", [])
+    
+    # Process AI results
+    for e in enhanced:
+        status = e.get("status")
+        if status == "FalsePositive":
+            # Filter from initial if it matches
+            initial_anomalies = [a for a in initial_anomalies if not (a["anomaly_type"] == e["anomaly_type"] and a["vendor_name"] == e["vendor_name"])]
+        elif status == "NEW_DETECTION":
+            final_anomalies.append(e)
+        else:
+            # CONFIRMED or existing
+            for a in initial_anomalies:
+                if a["anomaly_type"] == e["anomaly_type"] and a["vendor_name"] == e["vendor_name"]:
+                    a["reasoning"] = e.get("reasoning", a["reasoning"])
+                    a["severity"] = e.get("severity", a["severity"])
+    
+    final_anomalies.extend(initial_anomalies)
+    
+    for anomaly in final_anomalies:
+        await letta.store_to_archival(letta_client, agent_id, {
+            "type": "pattern_anomaly",
+            **anomaly,
+        })
+        
+    return {
+        "anomalies": final_anomalies,
+        "total_exposure_inr": sum(a.get("financial_exposure_inr", 0) for a in final_anomalies),
+        "summary": ai_result.get("summary", f"Detected {len(final_anomalies)} patterns using hybrid engine.")
+    }

@@ -57,26 +57,40 @@ Return ONLY strict JSON:
 """
 
 
+from backend.agents.reconciliation.recon_utils import fuzzy_match_ledger_data
+
+
 async def run_bank_reconciliation(
     bank_statement: list,
     gl_entries: list,
     letta_client,
     agent_id: str,
 ) -> dict:
-    """Run bank vs GL reconciliation."""
+    """Run bank vs GL reconciliation using hybrid approach."""
+    
+    # 1. Deterministic Matching (Reference/Description + Amount)
+    matched, bank_rem, gl_rem = fuzzy_match_ledger_data(
+        bank_statement, gl_entries, ref_key="description", amount_key="amount"
+    )
+
     user_msg = json.dumps({
-        "bank_statement_sample": bank_statement[:50],
-        "gl_entries_sample": gl_entries[:50],
+        "matched_count": len(matched),
+        "bank_unmatched_sample": bank_rem[:30],
+        "gl_unmatched_sample": gl_rem[:30],
         "bank_count": len(bank_statement),
         "gl_count": len(gl_entries),
     })
 
     try:
         result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
+        
+        # Merge deterministic results
+        result["matched_count"] = result.get("matched_count", 0) + len(matched)
+        
         await letta.store_to_archival(letta_client, agent_id, {
             "type": "bank_recon_result",
             "breaks": len(result.get("breaks", [])),
-            "matched": result.get("matched_count", 0),
+            "matched": result["matched_count"],
         })
         return result
     except Exception as e:

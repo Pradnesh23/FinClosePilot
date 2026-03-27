@@ -50,26 +50,41 @@ Return ONLY strict JSON:
 """
 
 
+from backend.agents.reconciliation.recon_utils import fuzzy_match_ledger_data
+
+
 async def run_vendor_reconciliation(
     ap_ledger: list,
     vendor_soa: list,
     letta_client,
     agent_id: str,
 ) -> dict:
-    """Run AP ledger vs vendor SOA reconciliation."""
+    """Run AP ledger vs vendor SOA reconciliation using hybrid approach."""
+    
+    # 1. Deterministic Matching (Invoice No + Amount)
+    matched, ap_rem, soa_rem = fuzzy_match_ledger_data(
+        ap_ledger, vendor_soa, ref_key="invoice_no", amount_key="amount"
+    )
+
     user_msg = json.dumps({
-        "ap_ledger_sample": ap_ledger[:50],
-        "vendor_soa_sample": vendor_soa[:50],
+        "matched_count": len(matched),
+        "ap_unmatched_sample": ap_rem[:30],
+        "soa_unmatched_sample": soa_rem[:30],
         "ap_count": len(ap_ledger),
         "soa_count": len(vendor_soa),
     })
 
     try:
         result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
+        
+        # Merge deterministic results
+        result["vendors_reconciled"] = result.get("vendors_reconciled", 0) + len(matched)
+        
         await letta.store_to_archival(letta_client, agent_id, {
             "type": "vendor_recon_result",
             "vendors_with_breaks": result.get("vendors_with_breaks", 0),
             "disputed_amount": result.get("total_disputed_amount", 0),
+            "matched_count": len(matched)
         })
         return result
     except Exception as e:

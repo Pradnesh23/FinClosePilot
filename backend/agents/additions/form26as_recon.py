@@ -143,25 +143,62 @@ async def parse_form26as_pdf(pdf_path: str) -> dict:
         return {"raw_text": "", "pages": 0, "parts_found": [], "error": str(e)}
 
 
+from backend.agents.reconciliation.recon_utils import fuzzy_match_ledger_data
+
+
 async def reconcile_form26as(
     form26as_data: dict,
     books_tds_data: list,
     letta_client,
     agent_id: str,
 ) -> dict:
-    """Run full reconciliation of Form 26AS vs company books."""
+    """Run full reconciliation of Form 26AS vs company books using hybrid approach."""
+    
+    raw_text = form26as_data.get("raw_text", "")
+    
+    # 1. Deterministic Extraction (Heuristic)
+    # In a real system, we'd use regex to build structured entries from raw_text.
+    # For now, we simulate the extraction of a few entries for matching.
+    extracted_entries = []
+    # (Regex simulation: looking for patterns like TAN: [A-Z]{4}\d{5}[A-Z] and amounts)
+    import re
+    tan_pattern = re.compile(r"([A-Z]{4}\d{5}[A-Z])")
+    amt_pattern = re.compile(r"(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)")
+    
+    tans = tan_pattern.findall(raw_text)
+    amts = amt_pattern.findall(raw_text)
+    
+    for i in range(min(len(tans), len(amts))):
+        extracted_entries.append({
+            "deductor_tan": tans[i],
+            "amount": float(amts[i].replace(",", "")),
+            "source": "Form26AS"
+        })
+
+    # 2. Deterministic Match (TAN + Amount)
+    matched, form_rem, books_rem = fuzzy_match_ledger_data(
+        extracted_entries, books_tds_data, ref_key="deductor_tan", amount_key="amount"
+    )
+
     user_msg = json.dumps({
-        "form26as_raw": form26as_data.get("raw_text", "")[:3000],
-        "form26as_parts": form26as_data.get("parts_found", []),
-        "books_tds": books_tds_data[:30],
+        "matched_deterministic_count": len(matched),
+        "form26as_unmatched_sample": form_rem[:20],
+        "books_unmatched_sample": books_rem[:20],
+        "raw_text_snippet": raw_text[:2000],
     })
 
     try:
         result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
+        
+        # Merge deterministic matches into the result
+        result["summary"]["total_mismatches"] = len(result.get("tds_reconciliation", []))
+        # (Matched items aren't listed in 'tds_reconciliation' as they are not mismatches)
+        
         await letta.store_to_archival(letta_client, agent_id, {
             "type": "form26as_recon",
             "unclaimed_tds": result.get("summary", {}).get("total_tds_unclaimed_inr", 0),
             "notice_risk": result.get("summary", {}).get("estimated_notice_risk"),
+            "matched_count": len(matched)
         })
         return result
     except Exception as e:

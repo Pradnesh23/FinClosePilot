@@ -79,7 +79,16 @@ async def predict_close_timeline(
     })
 
     try:
+        # LLM only for risk factors and bottleneck narratives
         result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
+        
+        # Override calculation with deterministic results
+        result["predicted_completion_minutes"] = int(predicted_remaining / 60)
+        result["predicted_completion_time"] = (datetime.now(timezone.utc) + timedelta(seconds=predicted_remaining)).isoformat()
+        # Calibrating confidence based on progress
+        result["confidence"] = round(0.5 + (0.4 * (steps_done / len(PIPELINE_STEPS))), 2)
+        result["on_track"] = elapsed < (historical_avg * 60 * 1.2) # 20% buffer
+        
         result["historical_avg_minutes"] = historical_avg
         result["elapsed_seconds"] = elapsed
         return result
@@ -92,11 +101,11 @@ async def predict_close_timeline(
             "predicted_completion_time": predicted.isoformat(),
             "confidence": 0.7,
             "current_bottleneck": current_step,
-            "bottleneck_reason": "Processing in progress",
+            "bottleneck_reason": "Statistical estimate based on current rate",
             "steps_complete": steps_done,
             "steps_remaining": steps_remaining,
             "time_per_step_historical_avg": historical_avg / max(len(PIPELINE_STEPS), 1),
-            "risk_factors": ["CFO approval pending"] if current_state.get("hard_blocks", 0) > 0 else [],
+            "risk_factors": ["Rate-based projection"],
             "on_track": elapsed < historical_avg * 60,
         }
 

@@ -61,18 +61,39 @@ async def _fetch_url(url: str) -> str: # type: ignore
         return ""
 
 
+import hashlib
+
+
+def _get_page_hash(text: str) -> str:
+    """Generate MD5 hash of page content."""
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
+def _calculate_relevance_score(text: str) -> int:
+    """Count occurrences of regulatory keywords."""
+    keywords = ["GST", "SEBI", "MCA", "Circular", "Notification", "Amendment", "Rule", "Tax", "IndAS", "RBI"]
+    score = sum(1 for kw in keywords if kw.lower() in text.lower())
+    return score
+
+
 async def monitor_cbic() -> dict:
-    """Fetch CBIC notifications and extract new GST notifications."""
+    """Fetch CBIC notifications with hashing and filtering."""
     url = "https://www.cbic.gov.in/htdocs-cbec/gst/"
     raw_text = await _fetch_url(url)
 
     if not raw_text:
         return {"changes_found": [], "no_changes": True, "source": "CBIC", "error": "fetch_failed"}
 
+    # 1. Deterministic Relevance check
+    if _calculate_relevance_score(raw_text) == 0:
+        logger.info("[RegMonitor] CBIC: No keywords found, skipping AI.")
+        return {"changes_found": [], "no_changes": True, "source": "CBIC"}
+
     user_msg = f"Source: CBIC GST Notifications page\nURL: {url}\n\nPage content:\n{raw_text[:5000]}" # type: ignore
     try:
         result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
         result["source"] = "CBIC"
+        result["page_hash"] = _get_page_hash(raw_text)
         return result
     except Exception as e:
         logger.error(f"[RegMonitor] CBIC extraction failed: {e}")
@@ -80,17 +101,22 @@ async def monitor_cbic() -> dict:
 
 
 async def monitor_sebi() -> dict:
-    """Fetch SEBI circulars and extract new circulars."""
+    """Fetch SEBI circulars with hashing and filtering."""
     url = "https://www.sebi.gov.in/legal/circulars.html"
     raw_text = await _fetch_url(url)
 
     if not raw_text:
         return {"changes_found": [], "no_changes": True, "source": "SEBI", "error": "fetch_failed"}
 
+    if _calculate_relevance_score(raw_text) == 0:
+        logger.info("[RegMonitor] SEBI: No keywords found, skipping AI.")
+        return {"changes_found": [], "no_changes": True, "source": "SEBI"}
+
     user_msg = f"Source: SEBI Circulars page\nURL: {url}\n\nPage content:\n{raw_text[:5000]}" # type: ignore
     try:
         result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
         result["source"] = "SEBI"
+        result["page_hash"] = _get_page_hash(raw_text)
         return result
     except Exception as e:
         logger.error(f"[RegMonitor] SEBI extraction failed: {e}")
@@ -98,17 +124,22 @@ async def monitor_sebi() -> dict:
 
 
 async def monitor_mca() -> dict:
-    """Fetch MCA (Ministry of Corporate Affairs) notifications and extract new rules."""
+    """Fetch MCA notifications with hashing and filtering."""
     url = "https://www.mca.gov.in/content/mca/global/en/acts-rules/ebooks/rules.html"
     raw_text = await _fetch_url(url)
 
     if not raw_text:
         return {"changes_found": [], "no_changes": True, "source": "MCA", "error": "fetch_failed"}
 
+    if _calculate_relevance_score(raw_text) == 0:
+        logger.info("[RegMonitor] MCA: No keywords found, skipping AI.")
+        return {"changes_found": [], "no_changes": True, "source": "MCA"}
+
     user_msg = f"Source: MCA Rules and Notifications page\nURL: {url}\n\nPage content:\n{raw_text[:5000]}" # type: ignore
     try:
         result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
         result["source"] = "MCA"
+        result["page_hash"] = _get_page_hash(raw_text)
         return result
     except Exception as e:
         logger.error(f"[RegMonitor] MCA extraction failed: {e}")
