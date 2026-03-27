@@ -5,6 +5,7 @@ Uses scipy.stats.chisquare to detect fraudulent transaction patterns.
 
 import logging
 import math
+import json
 import numpy as np
 from scipy import stats
 from backend.agents.gemini_helper import call_gemini
@@ -62,6 +63,49 @@ def _benford_test(amounts: list[float]) -> dict:
         "actual_distribution": actual_pct,
         "expected_distribution": expected_pct,
     }
+
+
+async def _enhance_benford_with_ai(
+    violation: dict,
+    transactions: list,
+    run_id: str,
+) -> dict:
+    """Use AI to cross-check Benford violation and provide forensic context."""
+    from backend.agents.gemini_helper import call_gemini_json
+    
+    system_prompt = """
+    You are a Forensic Accountant Expert assessing a Benford's Law violation.
+    
+    Your task:
+    1. Cross-check the statistical anomaly. Does the distribution variation look like common fraud (e.g., fictitious invoices, threshold evasion)?
+    2. Provide a 'forensic_justification' for why this is or isn't suspicious.
+    3. Suggest a 'fraud_probability' (0.0 to 1.0).
+    4. Categorize the potential fraud type (e.g., 'ROUND_SUM_SCHEME', 'BILL_AND_HOLD', 'BENIGN_SKEW').
+    
+    Return ONLY valid JSON:
+    {
+      "ai_confirmation": "CONFIRMED|BENIGN|INSIGHTFUL_CORRECTION",
+      "forensic_justification": "string",
+      "fraud_probability": float,
+      "fraud_type": "string",
+      "confidence_score": float
+    }
+    """
+    
+    user_msg = json.dumps({
+        "vendor_name": violation.get("vendor_name"),
+        "actual_distribution": violation.get("actual_distribution"),
+        "expected_distribution": violation.get("expected_distribution"),
+        "transaction_count": violation.get("transaction_count"),
+        "sample_transactions": [{k: v for k, v in t.items() if k not in ["letta_id", "id"]} for t in transactions[:30]],
+    })
+    
+    try:
+        result = await call_gemini_json(system_prompt, user_msg)
+        return result
+    except Exception as e:
+        logger.error(f"[Benford] AI Enhancement failed: {e}")
+        return {}
 
 
 async def analyse_benford(
@@ -159,36 +203,36 @@ async def analyse_benford(
             )
 
         if test["flagged"]:
-            # Get Gemini reasoning for violation via model router
-            reasoning_prompt = (
-                f"Vendor: {vendor_name}\n"
-                f"Transaction count: {test['n']}\n"
-                f"Chi-squared: {test['chi_square']}\n"
-                f"p-value: {test['p_value']}\n"
-                f"Actual first-digit distribution: {test['actual_distribution']}\n"
-                f"Expected (Benford): {test['expected_distribution']}\n\n"
-                "Explain in 2-3 sentences why this Benford violation is suspicious "
-                "and what financial fraud it might indicate. "
-                "Also provide your confidence as a float 0.0-1.0."
-            )
-            reasoning_confidence = 0.85
-            try:
-                result = await route_call(
-                    "benford_violation_forensics",
-                    "You are a forensic accounting expert. Provide concise, specific reasoning.",
-                    reasoning_prompt,
-                    run_id=run_id,
-                )
-                reasoning = result["response"]
-                # Try to extract confidence from reasoning
-                import re
-                conf_match = re.search(r"confidence[:\s]*(0\.\d+)", reasoning.lower())
-                if conf_match:
-                    reasoning_confidence = float(conf_match.group(1))
-            except Exception:
-                reasoning = "Benford distribution significantly deviates from expected — manual review required."
+            violation = {
+                "vendor_name": vendor_name,
+                "anomaly_type": "BENFORD_VIOLATION",
+                "severity": "HIGH", # Default, updated below
+                "transaction_count": test["n"],
+                "chi_square": test["chi_square"],
+                "p_value": test["p_value"],
+                "financial_exposure_inr": round(total_exposure, 2),
+                "actual_distribution": test["actual_distribution"],
+                "expected_distribution": test["expected_distribution"],
+            }
 
+            # ── AI CROSS-CHECK & ENHANCEMENT ──
+            # The user wants to use AI to enhance accuracies of deterministic checks
+            relevant_txns = [t for t in transactions if (t.get("vendor_canonical") or t.get("vendor_name")) == vendor_name]
+            ai_enhancement = await _enhance_benford_with_ai(violation, relevant_txns, run_id)
+            
+            if ai_enhancement:
+                violation["reasoning"] = ai_enhancement.get("forensic_justification", "Statistical deviation confirmed by forensics.")
+                violation["reasoning_confidence"] = ai_enhancement.get("confidence_score", 0.85)
+                violation["fraud_probability"] = ai_enhancement.get("fraud_probability", 0.0)
+                violation["fraud_type"] = ai_enhancement.get("fraud_type", "UNKNOWN")
+                violation["ai_status"] = ai_enhancement.get("ai_confirmation", "CONFIRMED")
+            else:
+                violation["reasoning"] = "Benford distribution significantly deviates from expected — manual review required."
+                violation["reasoning_confidence"] = 0.50
+
+            reasoning_confidence = violation.get("reasoning_confidence", 0.5)
             severity = "CRITICAL" if p_value < 0.01 else "HIGH"
+            violation["severity"] = severity
 
             # ── CRITICAL ANOMALY + LOW LLM REASONING CONFIDENCE ──
             if p_value < 0.001 and reasoning_confidence < 0.80:
@@ -216,19 +260,8 @@ async def analyse_benford(
                 )
                 escalations.append(esc)
 
-            violation = {
-                "vendor_name": vendor_name,
-                "anomaly_type": "BENFORD_VIOLATION",
-                "severity": severity,
-                "transaction_count": test["n"],
-                "chi_square": test["chi_square"],
-                "p_value": test["p_value"],
-                "financial_exposure_inr": round(total_exposure, 2),
-                "actual_distribution": test["actual_distribution"],
-                "expected_distribution": test["expected_distribution"],
-                "reasoning": reasoning,
-                "reasoning_confidence": reasoning_confidence,
-            }
+            # violation dict is already built above
+            violations.append(violation)
 
             violations.append(violation)
 

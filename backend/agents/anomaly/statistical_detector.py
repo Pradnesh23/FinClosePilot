@@ -4,11 +4,49 @@ Detects financial outliers that deviate significantly from historical patterns.
 """
 
 import logging
+import json
 import numpy as np
 from scipy import stats
+from backend.agents.gemini_helper import call_gemini_json
 from backend.agents.confidence import escalate, CONFIDENCE_THRESHOLDS
 
 logger = logging.getLogger(__name__)
+
+
+async def _enhance_statistical_with_ai(
+    violation: dict,
+    vendor_history: list,
+) -> dict:
+    """Use AI to provide forensic context to a statistical outlier."""
+    system_prompt = """
+    You are a Forensic Accountant Expert.
+    We have detected a statistical outlier (high Z-score or IQR breach).
+    
+    Your task:
+    1. Assess if this outlier is a legitimate business expense or a fraud risk.
+    2. Provide a 'forensic_justification'.
+    3. Specify the 'risk_profile': 'LOW_BUSINESS_AS_USUAL', 'MEDIUM_UNUSUAL_ACTIVITY', or 'HIGH_FRAUD_INDICATOR'.
+    
+    Return ONLY valid JSON:
+    {
+      "risk_profile": "string",
+      "forensic_justification": "string",
+      "is_legitimate_estimate": bool,
+      "confidence_score": float
+    }
+    """
+    
+    user_msg = json.dumps({
+        "violation": violation,
+        "vendor_history_sample": [{k: v for k, v in t.items() if k not in ["letta_id", "id", "transaction_id"]} for t in vendor_history[:10]],
+    })
+    
+    try:
+        result = await call_gemini_json(system_prompt, user_msg)
+        return result
+    except Exception as e:
+        logger.error(f"[StatDetector] AI Enhancement failed: {e}")
+        return {}
 
 async def detect_statistical_anomalies(
     transactions: list,
@@ -72,6 +110,21 @@ async def detect_statistical_anomalies(
             "method": "Z-Score / IQR Hybrid",
         }
         
+        # ── AI ENHANCEMENT ──
+        # Use AI to provide forensic context to outliers
+        if severity in ["HIGH", "CRITICAL"]:
+            vendor_name = txn.get("vendor_name", "Unknown")
+            history = [t for t in transactions if (t.get("vendor_canonical") or t.get("vendor_name")) == vendor_name]
+            ai_enhancement = await _enhance_statistical_with_ai(violation, history)
+            
+            if ai_enhancement:
+                violation["reasoning"] = f"{violation['reasoning']} | {ai_enhancement.get('forensic_justification')}"
+                violation["risk_profile"] = ai_enhancement.get("risk_profile", "MEDIUM")
+                violation["ai_confidence"] = ai_enhancement.get("confidence_score", 0.70)
+                if ai_enhancement.get("risk_profile") == "LOW_BUSINESS_AS_USUAL":
+                    violation["severity"] = "LOW" # Downgrade if AI says it's normal
+                    severity = "LOW"
+
         # Escalate high/critical statistical anomalies
         if severity in ["HIGH", "CRITICAL"]:
             esc = await escalate(
@@ -81,7 +134,7 @@ async def detect_statistical_anomalies(
                 letta_client=letta_client,
                 agent_id=agent_id,
                 run_id=run_id,
-                confidence=0.90,
+                confidence=violation.get("ai_confidence", 0.90),
                 threshold=CONFIDENCE_THRESHOLDS["anomaly_classification"],
                 escalation_level="CFO" if severity == "CRITICAL" else "HUMAN_REVIEW",
             )

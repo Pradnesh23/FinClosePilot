@@ -4,15 +4,54 @@ Uses rapidfuzz to find duplicate invoices within a 30-day window.
 """
 
 import logging
+import json
 from datetime import datetime, timedelta
 from rapidfuzz import fuzz
-from backend.agents.gemini_helper import call_gemini
+from backend.agents.gemini_helper import call_gemini, call_gemini_json
 from backend.memory import letta_client as letta
 
 logger = logging.getLogger(__name__)
 
 SIMILARITY_THRESHOLD = 92  # %
 WINDOW_DAYS = 30
+
+
+async def _crosscheck_duplicate_with_ai(
+    txn_a: dict,
+    txn_b: dict,
+    similarity: float,
+) -> dict:
+    """Use AI to confirm/reject the fuzzy duplicate match."""
+    system_prompt = """
+    You are a Forensic Accountant Expert.
+    We have detected a potential duplicate payment based on fuzzy matching.
+    
+    Your task:
+    1. Assess if these two transactions are likely the SAME payment processed twice.
+    2. Provide a 'confidence_score' and 'forensic_reasoning'.
+    3. Set 'status' to 'CONFIRMED' if it's a duplicate, or 'POTENTIAL_FALSE_POSITIVE' if it's likely legitimate.
+    
+    Return ONLY valid JSON:
+    {
+      "status": "CONFIRMED|POTENTIAL_FALSE_POSITIVE",
+      "forensic_reasoning": "string",
+      "confidence_score": float,
+      "risk_level": "CRITICAL|HIGH|MEDIUM|LOW"
+    }
+    """
+    
+    user_msg = json.dumps({
+        "txn_a": {k: v for k, v in txn_a.items() if k not in ["letta_id", "id", "transaction_id"]},
+        "txn_b": {k: v for k, v in txn_b.items() if k not in ["letta_id", "id", "transaction_id"]},
+        "algorithmic_similarity": similarity
+    })
+    
+    try:
+        result = await call_gemini_json(system_prompt, user_msg)
+        return result
+    except Exception as e:
+        logger.error(f"[DuplicateDetector] AI Cross-check failed: {e}")
+        return {}
 
 
 def _parse_date(date_str: str):
@@ -75,28 +114,20 @@ async def detect_duplicates(
             similarity = _compute_similarity(txn_a, txn_b)
             if similarity >= SIMILARITY_THRESHOLD:
                 seen_pairs.add(pair_key)
-                # Get Gemini reasoning
-                reason_prompt = (
-                    f"Transaction A: Invoice {txn_a.get('invoice_no')} | "
-                    f"Vendor {txn_a.get('vendor_name')} | Amount Rs {txn_a.get('amount')} | Date {txn_a.get('date')}\n"
-                    f"Transaction B: Invoice {txn_b.get('invoice_no')} | "
-                    f"Vendor {txn_b.get('vendor_name')} | Amount Rs {txn_b.get('amount')} | Date {txn_b.get('date')}\n"
-                    f"Similarity score: {similarity:.1f}%\n\n"
-                    "Is this a likely duplicate payment? Explain in 2 sentences and state the financial risk."
-                )
-                try:
-                    reasoning = await call_gemini(
-                        "You are a forensic accounting expert.",
-                        reason_prompt,
-                    )
-                except Exception:
-                    reasoning = f"High similarity ({similarity:.1f}%) detected — possible duplicate payment."
+                
+                # ── AI CROSS-CHECK & ENHANCEMENT ──
+                # The user wants to use AI to enhance accuracies of deterministic checks
+                ai_check = await _crosscheck_duplicate_with_ai(txn_a, txn_b, similarity)
+                
+                if ai_check.get("status") == "POTENTIAL_FALSE_POSITIVE" and ai_check.get("confidence_score", 0) > 0.8:
+                    logger.info(f"[DuplicateDetector] AI rejected match: {txn_a.get('invoice_no')} (conf {ai_check.get('confidence_score')})")
+                    continue
 
                 dup = {
                     "anomaly_type": "DUPLICATE_PAYMENT",
-                    "severity": "HIGH",
-                    "transaction_id_a": txn_a.get("transaction_id", f"txn_{i}"),
-                    "transaction_id_b": txn_b.get("transaction_id", f"txn_{j}"),
+                    "severity": ai_check.get("risk_level", "HIGH"),
+                    "transaction_id_a": txn_a.get("transaction_id") or txn_a.get("id") or f"txn_{i}",
+                    "transaction_id_b": txn_b.get("transaction_id") or txn_b.get("id") or f"txn_{j}",
                     "vendor_name": txn_a.get("vendor_name", "Unknown"),
                     "vendor_gstin": txn_a.get("vendor_gstin"),
                     "invoice_no": txn_a.get("invoice_no"),
@@ -106,7 +137,9 @@ async def detect_duplicates(
                     "date_b": str(txn_b.get("date")),
                     "days_apart": abs((date_a - date_b).days),
                     "similarity_score": round(similarity, 1),
-                    "reasoning": reasoning,
+                    "reasoning": ai_check.get("forensic_reasoning", f"High similarity ({similarity:.1f}%) detected — possible duplicate payment."),
+                    "ai_confidence": ai_check.get("confidence_score", 0.5),
+                    "ai_status": ai_check.get("status", "POTENTIAL"),
                 }
 
                 duplicates.append(dup)

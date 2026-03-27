@@ -252,8 +252,22 @@ async def check_gst_guardrails(
             save_guardrail_fire(run_id, fire)
             await letta.store_guardrail_fire(letta_client, agent_id, fire)
 
+    # ── AI CROSS-CHECK & ENHANCEMENT ──
+    # The user wants to use AI to enhance accuracies of deterministic checks
+    enhanced_fires = await _crosscheck_gst_with_ai(
+        transactions, fires, letta_client, agent_id, run_id
+    )
+    
+    # Re-calculate totals after AI enhancement
+    final_fires = [f for f in enhanced_fires if f.get("status") != "REJECTED_BY_AI"]
+    hard_blocks = sum(1 for f in final_fires if f.get("rule_level") == "HARD_BLOCK")
+    soft_flags = sum(1 for f in final_fires if f.get("rule_level") == "SOFT_FLAG")
+    advisories = sum(1 for f in final_fires if f.get("rule_level") == "ADVISORY")
+    total_blocked_inr = sum(float(f.get("itc_blocked_inr") or f.get("amount_inr") or 0) 
+                            for f in final_fires if f.get("rule_level") == "HARD_BLOCK")
+
     return {
-        "fires": fires,
+        "fires": final_fires,
         "hard_blocks": hard_blocks,
         "soft_flags": soft_flags,
         "advisories": advisories,
@@ -264,7 +278,83 @@ async def check_gst_guardrails(
         "summary": (
             f"GST guardrails: {hard_blocks} HARD BLOCKs, "
             f"{soft_flags} SOFT FLAGs, {advisories} ADVISORY. "
-            f"{len(escalations)} escalated."
+            f"{len(escalations)} escalated. AI Enhanced."
         ),
     }
+
+
+async def _crosscheck_gst_with_ai(
+    transactions: list,
+    fires: list,
+    letta_client,
+    agent_id: str,
+    run_id: str,
+) -> list:
+    """Use AI to cross-check and enhance accuracy of deterministic GST guardrail fires."""
+    if not transactions and not fires:
+        return fires
+
+    system_prompt = """
+    You are a GST Compliance Expert cross-checking automated guardrail results.
+    You will receive a list of transactions (sample) and the 'fires' (violations) already detected by algorithms.
+    
+    Your task:
+    1. Verify if the 'fires' are correct. If you find a false positive, mark it for removal (REJECTED_BY_AI).
+    2. Identify any MISSED violations that the simple keyword/math algorithms might have overlooked (e.g., subtle S17(5) blocks like luxury memberships masked as 'consultancy').
+    3. Provide a 'ai_confidence' score (0.0 to 1.0) and 'ai_justification' for each fire.
+    
+    Return ONLY valid JSON:
+    {
+      "enhanced_fires": [{
+        "rule_id": "string",
+        "rule_level": "HARD_BLOCK|SOFT_FLAG|ADVISORY",
+        "regulation": "string",
+        "transaction_id": "string",
+        "violation_detail": "string",
+        "ai_confidence": float,
+        "ai_justification": "string",
+        "status": "CONFIRMED|FalsePositive|NEW_DETECTION"
+      }]
+    }
+    """
+    
+    user_msg = json.dumps({
+        "detected_fires_count": len(fires),
+        "detected_fires": [{k: v for k, v in f.items() if k != "letta_id"} for f in fires],
+        "transactions_sample": transactions[:30],
+    })
+    
+    try:
+        result = await call_gemini_json(system_prompt, user_msg)
+        enhanced_list = []
+        ai_fires = result.get("enhanced_fires", [])
+        
+        for ai_f in ai_fires:
+            status = ai_f.get("status")
+            if status == "FalsePositive":
+                for f in fires:
+                    if str(f.get("transaction_id")) == str(ai_f.get("transaction_id")) and f.get("rule_id") == ai_f.get("rule_id"):
+                        f["status"] = "REJECTED_BY_AI"
+                        f["ai_justification"] = ai_f.get("ai_justification")
+            elif status == "NEW_DETECTION":
+                # Find the actual transaction for context
+                txn = next((t for t in transactions if str(t.get("id") or t.get("transaction_id")) == str(ai_f.get("transaction_id"))), {})
+                ai_f["run_id"] = run_id
+                ai_f["vendor_name"] = txn.get("vendor_canonical") or txn.get("vendor_name")
+                ai_f["amount_inr"] = float(txn.get("amount", 0))
+                ai_f["source"] = "AI_ENHANCEMENT"
+                enhanced_list.append(ai_f)
+                save_guardrail_fire(run_id, ai_f)
+                await letta.store_guardrail_fire(letta_client, agent_id, ai_f)
+            else:
+                # CONFIRMED
+                for f in fires:
+                    if str(f.get("transaction_id")) == str(ai_f.get("transaction_id")) and f.get("rule_id") == ai_f.get("rule_id"):
+                        f["ai_confidence"] = ai_f.get("ai_confidence")
+                        f["ai_justification"] = ai_f.get("ai_justification")
+        
+        return fires + enhanced_list
+    except Exception as e:
+        logger.error(f"[GSTGuardrails] AI Enhancement failed: {e}")
+        return fires
 
