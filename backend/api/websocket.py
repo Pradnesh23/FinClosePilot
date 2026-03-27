@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Callable
-from fastapi import WebSocket
+from fastapi import WebSocket # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class WebSocketManager:
 
     def make_callback(self, run_id: str) -> Callable:
         """Returns an async callback function for pipeline steps to broadcast."""
-        async def callback(event: str, agent: str, data: dict = None, status: str = "RUNNING"):
+        async def callback(event: str, agent: str, data: dict = None, status: str = "RUNNING"): # type: ignore
             await self.broadcast(run_id, {
                 "event": event,
                 "agent": agent,

@@ -1,6 +1,9 @@
 import sys
 import os
+import logging
 from dotenv import load_dotenv
+
+logging.basicConfig(level=logging.DEBUG)
 
 # Add the project root to sys.path to import backend modules
 sys.path.append(os.getcwd())
@@ -20,9 +23,9 @@ try:
         
         # Test agent listing
         try:
-            agents = wrapper.client.list_agents()
-            print(f"Number of agents found: {len(agents)}")
-            for a in agents:
+            agents = wrapper.client.agents.list()
+            print(f"Number of agents found: {len(agents.items)}")
+            for a in agents.items:
                 print(f" - Agent: {a.name} (id: {a.id})")
         except Exception as e:
             print(f"[-] Error listing agents: {e}")

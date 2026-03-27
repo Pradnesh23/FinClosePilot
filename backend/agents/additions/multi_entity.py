@@ -121,27 +121,20 @@ async def calculate_intercompany_eliminations(parent_data: dict, subsidiary_data
 
 async def get_entity_close_status(entities: list, run_ids: dict) -> dict:
     """Returns close status per entity."""
-    from backend.database.models import get_db_connection
-    conn = get_db_connection()
     status = {}
-    try:
-        for entity in entities:
-            eid = entity.get("entity_id")
-            run_id = run_ids.get(eid)
-            if run_id:
-                row = conn.execute(
-                    "SELECT status, total_records, matched_records FROM pipeline_runs WHERE run_id = ?",
-                    (run_id,),
-                ).fetchone()
-                if row:
-                    pct = (row["matched_records"] / max(row["total_records"], 1)) * 100
-                    status[eid] = {
-                        "status": row["status"],
-                        "pct_complete": round(pct, 1),
-                        "blocking_items": [],
-                    }
-                    continue
-            status[eid] = {"status": "PENDING", "pct_complete": 0, "blocking_items": []}
-    finally:
-        conn.close()
+    from backend.database.audit_logger import get_run
+    for entity in entities:
+        eid = entity.get("entity_id")
+        run_id = run_ids.get(eid)
+        if run_id:
+            row = get_run(run_id) or {}
+            if row and row.get("status") is not None:
+                pct = (float(row.get("matched_records") or 0) / max(float(row.get("total_records") or 1), 1.0)) * 100
+                status[eid] = {
+                    "status": row.get("status", "UNKNOWN"),
+                    "pct_complete": round(pct, 1),
+                    "blocking_items": [],
+                }
+                continue
+        status[eid] = {"status": "PENDING", "pct_complete": 0, "blocking_items": []}
     return status

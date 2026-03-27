@@ -7,14 +7,14 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI # type: ignore
+from fastapi.middleware.cors import CORSMiddleware # type: ignore
 
-from backend.config import CORS_ORIGINS, DEBUG
-from backend.database.models import init_db
-from backend.api.routes import router, init_letta_on_startup
-from backend.agents.additions.regulatory_monitor import start_periodic_regulatory_monitor
-from backend.notifications.telegram_bot import stop_telegram_bot
+from backend.config import CORS_ORIGINS, DEBUG # type: ignore
+from backend.database.models import init_db # type: ignore
+from backend.api.routes import router, init_letta_on_startup # type: ignore
+from backend.agents.additions.regulatory_monitor import start_periodic_regulatory_monitor # type: ignore
+from backend.notifications.telegram_bot import stop_telegram_bot # type: ignore
 
 logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
@@ -28,20 +28,21 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
     logger.info("[Startup] Initializing FinClosePilot...")
     os.makedirs("./data/demo", exist_ok=True)
+    os.makedirs("./data/runs", exist_ok=True)
 
-    # Initialize SQLite tables
+    # Initialize DB tables
     init_db()
 
     # Initialize Letta client
     await init_letta_on_startup()
 
     # Import after Letta is initialized to get agent_id
-    from backend.api.routes import get_letta
+    from backend.api.routes import get_letta # type: ignore
     lc, ag = get_letta()
 
     # Start Telegram bot in background
     try:
-        from backend.notifications.telegram_bot import start_telegram_bot
+        from backend.notifications.telegram_bot import start_telegram_bot # type: ignore
         asyncio.create_task(start_telegram_bot())
     except Exception as e:
         logger.warning(f"[Startup] Telegram bot skipped: {e}")

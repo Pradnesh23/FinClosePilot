@@ -5,8 +5,8 @@ RLHF Signal Collector — captures human corrections from CFO overrides.
 import logging
 import json
 from datetime import datetime
-from backend.database.audit_logger import save_rlhf_signal
-from backend.memory import letta_client as letta
+from backend.database.audit_logger import save_rlhf_signal # type: ignore
+from backend.memory import letta_client as letta # type: ignore
 
 logger = logging.getLogger(__name__)
 

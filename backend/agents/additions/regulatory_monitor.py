@@ -6,11 +6,11 @@ Runs every 6 hours via background asyncio task.
 import logging
 import asyncio
 from datetime import datetime, timezone
-import httpx
-from backend.agents.gemini_helper import call_gemini_json
-from backend.memory import letta_client as letta
-from backend.database.audit_logger import save_regulatory_change
-from backend.notifications.telegram_bot import send_guardrail_alert
+import httpx # type: ignore
+from backend.agents.gemini_helper import call_gemini_json # type: ignore
+from backend.memory import letta_client as letta # type: ignore
+from backend.database.audit_logger import save_regulatory_change # type: ignore
+from backend.notifications.telegram_bot import send_guardrail_alert # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ _HEADERS = {
 }
 
 
-async def _fetch_url(url: str) -> str:
+async def _fetch_url(url: str) -> str: # type: ignore
     """Async HTTP fetch with timeout and error handling."""
     try:
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
@@ -69,7 +69,7 @@ async def monitor_cbic() -> dict:
     if not raw_text:
         return {"changes_found": [], "no_changes": True, "source": "CBIC", "error": "fetch_failed"}
 
-    user_msg = f"Source: CBIC GST Notifications page\nURL: {url}\n\nPage content:\n{raw_text[:5000]}"
+    user_msg = f"Source: CBIC GST Notifications page\nURL: {url}\n\nPage content:\n{raw_text[:5000]}" # type: ignore
     try:
         result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
         result["source"] = "CBIC"
@@ -87,7 +87,7 @@ async def monitor_sebi() -> dict:
     if not raw_text:
         return {"changes_found": [], "no_changes": True, "source": "SEBI", "error": "fetch_failed"}
 
-    user_msg = f"Source: SEBI Circulars page\nURL: {url}\n\nPage content:\n{raw_text[:5000]}"
+    user_msg = f"Source: SEBI Circulars page\nURL: {url}\n\nPage content:\n{raw_text[:5000]}" # type: ignore
     try:
         result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
         result["source"] = "SEBI"
@@ -105,7 +105,7 @@ async def monitor_mca() -> dict:
     if not raw_text:
         return {"changes_found": [], "no_changes": True, "source": "MCA", "error": "fetch_failed"}
 
-    user_msg = f"Source: MCA Rules and Notifications page\nURL: {url}\n\nPage content:\n{raw_text[:5000]}"
+    user_msg = f"Source: MCA Rules and Notifications page\nURL: {url}\n\nPage content:\n{raw_text[:5000]}" # type: ignore
     try:
         result = await call_gemini_json(SYSTEM_PROMPT, user_msg)
         result["source"] = "MCA"

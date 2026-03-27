@@ -44,11 +44,11 @@ async def check_database():
     """Verify database connection and schema."""
     logger.info("--- Checking Database Connection ---")
     try:
-        from backend.database.models import get_db_connection
-        
-        conn = get_db_connection()
-        conn.execute("SELECT 1")
-        conn.close()
+        from sqlalchemy import text
+        from backend.database.models import get_engine
+        eng = get_engine()
+        with eng.connect() as conn:
+            conn.execute(text("SELECT 1"))
         logger.info("✅ Database connection successful")
         return True
     except Exception as e:

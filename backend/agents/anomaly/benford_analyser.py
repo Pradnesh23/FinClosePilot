@@ -5,12 +5,12 @@ Uses scipy.stats.chisquare to detect fraudulent transaction patterns.
 
 import logging
 import math
-import numpy as np
-from scipy import stats
-from backend.agents.gemini_helper import call_gemini
-from backend.agents.model_router import route_call
-from backend.agents.confidence import escalate, CONFIDENCE_THRESHOLDS
-from backend.memory import letta_client as letta
+import numpy as np # type: ignore
+from scipy import stats # type: ignore
+from backend.agents.gemini_helper import call_gemini # type: ignore
+from backend.agents.model_router import route_call # type: ignore
+from backend.agents.confidence import escalate, CONFIDENCE_THRESHOLDS # type: ignore
+from backend.memory import letta_client as letta # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -49,16 +49,16 @@ def _benford_test(amounts: list[float]) -> dict:
 
     chi2, p_value = stats.chisquare(observed, expected_counts)
 
-    actual_pct = {d: round(float(observed[d - 1] / n * 100), 1) for d in range(1, 10)}
+    actual_pct = {d: round(float(observed[d - 1] / n * 100), 1) for d in range(1, 10)} # type: ignore
     expected_pct = {d: BENFORD_EXPECTED[d] for d in range(1, 10)}
 
     return {
         "skip": False,
         "n": n,
-        "chi_square": round(float(chi2), 4),
-        "p_value": round(float(p_value), 6),
-        "flagged": p_value < 0.05,
-        "borderline": 0.05 <= p_value < 0.08,
+        "chi_square": round(float(chi2), 4), # type: ignore
+        "p_value": round(float(p_value), 6), # type: ignore
+        "flagged": p_value < 0.05, # type: ignore
+        "borderline": 0.05 <= p_value < 0.08, # type: ignore
         "actual_distribution": actual_pct,
         "expected_distribution": expected_pct,
     }

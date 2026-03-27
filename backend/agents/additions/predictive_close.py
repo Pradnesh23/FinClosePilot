@@ -108,19 +108,13 @@ async def update_prediction(
     agent_id: str,
 ) -> dict:
     """Re-calculate prediction after a step completes."""
-    from backend.database.models import get_db_connection
-    conn = get_db_connection()
+    from backend.database.audit_logger import get_run
+    run_row = get_run(run_id) or {}
     try:
-        run_row = conn.execute(
-            "SELECT created_at FROM pipeline_runs WHERE run_id = ?", (run_id,)
-        ).fetchone()
-        if run_row:
-            created_at = datetime.fromisoformat(run_row["created_at"])
-            elapsed = (datetime.utcnow() - created_at).total_seconds()
-        else:
-            elapsed = 0
-    finally:
-        conn.close()
+        created_at = datetime.fromisoformat(run_row.get("created_at")) if run_row.get("created_at") else None
+        elapsed = (datetime.utcnow() - created_at).total_seconds() if created_at else 0
+    except Exception:
+        elapsed = 0
 
     current_state = {
         "current_step": step_completed,

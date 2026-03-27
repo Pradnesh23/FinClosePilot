@@ -16,7 +16,7 @@ for i in range(3000, 3100):
                      amt,18,amt,0,round(amt*0.09),round(amt*0.09),'FILED'])
 
 # 2. MATCH - XYZ Supplies (Benford violation) - supplier filed correctly
-benford_amounts = [78500,89000,97000,75200,82300,93100,87500,76800,91000,84500][:10]
+benford_amounts = [78500,89000,97000,75200,82300,93100,87500,76800,91000,84500][:10] # type: ignore
 for i,amt in enumerate(benford_amounts):
     gst_rows.append(['27AABCX1234D1ZS','XYZ Supplies Pvt Ltd',f'INV-XYZ-{500+i}',(start + timedelta(days=i%90)).strftime('%Y-%m-%d'),
                      amt,18,amt,0,round(amt*0.09,2),round(amt*0.09,2),'FILED'])

@@ -5,8 +5,8 @@ Identifies additional patterns like round number clustering, MSME risks, etc.
 
 import logging
 import json
-from backend.agents.gemini_helper import call_gemini_json
-from backend.memory import letta_client as letta
+from backend.agents.gemini_helper import call_gemini_json # type: ignore
+from backend.memory import letta_client as letta # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ async def detect_patterns(
 ) -> dict:
     """Detect anomaly patterns using Gemini classification."""
     user_msg = json.dumps({
-        "transactions": transactions[:200],
+        "transactions": transactions[:200], # type: ignore
         "total_count": len(transactions),
     })
 

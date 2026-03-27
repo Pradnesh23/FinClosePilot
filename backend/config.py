@@ -14,3 +14,4 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CFO_CHAT_ID = os.getenv("TELEGRAM_CFO_CHAT_ID", "")
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000")
 DEBUG = os.getenv("DEBUG", "true").lower() == "true"
+REDIS_URL = os.getenv("REDIS_URL", "")

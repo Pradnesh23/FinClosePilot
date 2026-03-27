@@ -6,10 +6,10 @@ Hard blocks and soft flags on transactions.
 import logging
 import json
 from datetime import datetime
-from backend.agents.gemini_helper import call_gemini_json
-from backend.agents.confidence import escalate, check_confidence
-from backend.memory import letta_client as letta
-from backend.database.audit_logger import save_guardrail_fire
+from backend.agents.gemini_helper import call_gemini_json # type: ignore
+from backend.agents.confidence import escalate, check_confidence # type: ignore
+from backend.memory import letta_client as letta # type: ignore
+from backend.database.audit_logger import save_guardrail_fire # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +67,8 @@ def _check_s17_5(txn: dict) -> dict | None:
     vendor = (txn.get("vendor_canonical") or txn.get("vendor_name") or "").lower()
 
     for rule_id, rule in [("S17_5_B_I", GST_RULES["S17_5_B_I"]), ("S17_5_B_II", GST_RULES["S17_5_B_II"])]:
-        for keyword in rule["blocked_keywords"]:
-            if keyword in narration or keyword in vendor:
+        for keyword in rule["blocked_keywords"]: # type: ignore
+            if keyword in narration or keyword in vendor: # type: ignore
                 itc = (
                     float(txn.get("cgst") or 0)
                     + float(txn.get("sgst") or 0)
@@ -78,7 +78,7 @@ def _check_s17_5(txn: dict) -> dict | None:
                     return {
                         "rule_id": rule_id,
                         "rule_level": "HARD_BLOCK",
-                        "regulation": rule["regulation"],
+                        "regulation": rule["regulation"], # type: ignore
                         "section": rule_id.replace("_", " "),
                         "vendor_name": txn.get("vendor_canonical") or txn.get("vendor_name"),
                         "vendor_gstin": txn.get("vendor_gstin"),
@@ -105,8 +105,8 @@ def _check_rule364(books_itc: float, gstr2a_itc: float) -> dict | None:
             "section": "Rule 36(4)",
             "books_itc": books_itc,
             "gstr2a_itc": gstr2a_itc,
-            "excess_pct": round(excess_pct, 2),
-            "excess_amount": round(books_itc - gstr2a_itc, 2),
+            "excess_pct": round(excess_pct, 2), # type: ignore
+            "excess_amount": round(books_itc - gstr2a_itc, 2), # type: ignore
             "violation_detail": f"ITC claimed Rs {books_itc:,.0f} exceeds GSTR-2A Rs {gstr2a_itc:,.0f} by {excess_pct:.1f}%",
             "action_taken": "Excess ITC queued for next quarter (deferred).",
         }
@@ -224,13 +224,13 @@ async def check_gst_guardrails(
                 fire["run_id"] = run_id
                 fires.append(fire)
                 if fire.get("rule_level") == "HARD_BLOCK":
-                    hard_blocks += 1
-                    total_blocked_inr += float(fire.get("itc_blocked_inr") or fire.get("amount_inr") or 0)
+                    hard_blocks += 1 # type: ignore
+                    total_blocked_inr += float(fire.get("itc_blocked_inr") or fire.get("amount_inr") or 0) # type: ignore
                 elif fire.get("rule_level") == "SOFT_FLAG":
-                    soft_flags += 1
-                    total_flagged_inr += float(fire.get("amount_inr") or 0)
+                    soft_flags += 1 # type: ignore
+                    total_flagged_inr += float(fire.get("amount_inr") or 0) # type: ignore
                 else:
-                    advisories += 1
+                    advisories += 1 # type: ignore
                 save_guardrail_fire(run_id, fire)
                 await letta.store_guardrail_fire(letta_client, agent_id, fire)
 
@@ -247,8 +247,8 @@ async def check_gst_guardrails(
             fire["transaction_id"] = None
             fire["amount_inr"] = fire.get("excess_amount", 0)
             fires.append(fire)
-            soft_flags += 1
-            total_flagged_inr += float(fire.get("excess_amount") or 0)
+            soft_flags += 1 # type: ignore
+            total_flagged_inr += float(fire.get("excess_amount") or 0) # type: ignore
             save_guardrail_fire(run_id, fire)
             await letta.store_guardrail_fire(letta_client, agent_id, fire)
 
@@ -258,7 +258,7 @@ async def check_gst_guardrails(
         "soft_flags": soft_flags,
         "advisories": advisories,
         "total_blocked_inr": round(total_blocked_inr, 2),
-        "total_flagged_inr": round(total_flagged_inr, 2),
+        "total_flagged_inr": round(total_flagged_inr, 2), # type: ignore
         "rules_applied": list(GST_RULES.keys()),
         "escalations": escalations,
         "summary": (
