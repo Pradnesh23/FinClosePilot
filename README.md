@@ -45,7 +45,19 @@ FinClosePilot is a **multi-agent AI system** that automates the Indian enterpris
 
 </td>
 </tr>
+</td>
+</tr>
 </table>
+
+---
+
+## 📖 Plain English Explainer (For Accountants & CAs)
+If you are an auditor, accountant, or CFO, FinClosePilot operates exactly like a virtual financial team:
+1. **Data Ingestion:** Upload your messy ERP ledgers, Bank Statements, and GSTR-2B. The AI automatically cleans and formats it.
+2. **Reconciliation:** Agents automatically execute fuzzy matching across Vendor, Bank, and GST records to find missing/mismatched invoices.
+3. **Forensic Analysis:** Before finalizing, the AI runs Benford’s Law and statistical analysis to flag duplicate invoices or unusual vendor billing spikes.
+4. **Compliance Checking:** The data is run against live IndAS, CGST Act, and SEBI rules to ensure you don't illegally claim invalid Input Tax Credit (ITC) or violate MSME payment rules.
+5. **Final Output:** The system instantly generates your GSTR-3B summary, Variance Reports, and Audit Committee presentation, saving literally weeks of manual Excel work.
 
 ---
 

@@ -89,10 +89,11 @@ async def register(
     conn = get_db_connection()
     try:
         cursor = conn.execute(
-            "INSERT INTO users (username, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO users (username, email, password_hash, role, created_at) VALUES (%s, %s, %s, %s, %s) RETURNING id",
             (username, email, hashed_pwd, role, now)
         )
-        user_id = cursor.lastrowid
+        row = cursor.fetchone()
+        user_id = row['id'] if row else 0
         conn.commit()
         return User(
             id=user_id,
@@ -320,7 +321,7 @@ async def get_run_result(run_id: str, current_user: User = Depends(get_current_u
     conn = get_db_connection()
     try:
         anomaly_rows = conn.execute(
-            "SELECT * FROM anomalies WHERE run_id = ?", (run_id,)
+            "SELECT * FROM anomalies WHERE run_id = %s", (run_id,)
         ).fetchall()
         anomalies = [dict(a) for a in anomaly_rows]
     finally:

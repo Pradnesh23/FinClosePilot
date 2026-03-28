@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Optional, Union
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
@@ -16,7 +16,6 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY", "finclosepilot_super_secret_key_1234567
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 class Token(BaseModel):
@@ -34,10 +33,18 @@ class User(BaseModel):
     created_at: str
 
 def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+    import hashlib
+    sha256_hash = hashlib.sha256(plain_password.encode()).hexdigest()
+    try:
+        return bcrypt.checkpw(sha256_hash.encode(), hashed_password.encode())
+    except Exception:
+        return False
 
 def get_password_hash(password):
-    return pwd_context.hash(password)
+    import hashlib
+    sha256_hash = hashlib.sha256(password.encode()).hexdigest()
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(sha256_hash.encode(), salt).decode()
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -52,7 +59,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 def get_user(username: str):
     conn = get_db_connection()
     try:
-        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        row = conn.execute("SELECT * FROM users WHERE username = %s", (username,)).fetchone()
         if row:
             return dict(row)
         return None
@@ -62,7 +69,7 @@ def get_user(username: str):
 def get_user_by_email(email: str):
     conn = get_db_connection()
     try:
-        row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        row = conn.execute("SELECT * FROM users WHERE email = %s", (email,)).fetchone()
         if row:
             return dict(row)
         return None
