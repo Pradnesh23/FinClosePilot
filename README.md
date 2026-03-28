@@ -10,7 +10,8 @@
   <img src="https://img.shields.io/badge/Letta-MemGPT-8B5CF6?style=flat-square" />
   <img src="https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwind-css" />
   <img src="https://img.shields.io/badge/FastAPI-0.109-009688?style=flat-square&logo=fastapi" />
-  <img src="https://img.shields.io/badge/SQLite-Audit_Trail-003B57?style=flat-square&logo=sqlite" />
+  <img src="https://img.shields.io/badge/Neon_PostgreSQL-Database-00E599?style=flat-square&logo=postgresql" />
+  <img src="https://img.shields.io/badge/Redis-Memory_Cache-DC382D?style=flat-square&logo=redis" />
 </p>
 
 <p align="center">
@@ -115,8 +116,8 @@ flowchart TD
         I1 & I2 & I3 & I4 --> J["Audit Package"]
         J --> K["🔔 Telegram"]
         J --> L["📺 Dashboard"]
-        J --> M["🗄️ SQLite Trail"]
-        J --> N["🧠 Letta Memory"]
+        J --> M["🐘 Neon PostgreSQL"]
+        J --> N["🧠 Letta + Redis"]
     end
 
     C1 -.->|"low confidence"| ESC["⚠️ Escalation Engine"]
@@ -167,13 +168,14 @@ flowchart TD
 |------|---------|
 | 🧠 **Tri-Provider Router** | OpenRouter / Groq / Gemini native routing |
 | 🗃️ **Letta (MemGPT)** | Cross-cycle persistent memory |
-| 🗄️ **SQLite** | Audit trail, runs, escalations |
+| 🐘 **Neon PostgreSQL** | Cloud DB for users, runs, escalations |
 
 </td>
 <td>
 
 | Tool | Purpose |
 |------|---------|
+| ⚡ **Upstash Redis** | High-speed cache for Letta & system configs |
 | 🔔 **Telegram Bot** | Real-time CFO HARD_BLOCK alerts |
 | 📐 **NumPy / SciPy** | Benford chi-squared statistics |
 | ⚡ **LangGraph** | DAG pipeline + conditional retry |
@@ -313,6 +315,9 @@ pip install "letta>=0.5.0,<0.6.0"
 ### 🔠 Windows Unicode Errors
 If scripts like `diagnose_env.py` or `check_letta.py` crash with `UnicodeEncodeError`, it's due to the terminal's character map (cp1252) not supporting emojis. We have updated the diagnostic scripts to use ASCII indicators (`[OK]`, `[ERROR]`) for compatibility.
 
+### 🔐 500 Internal Server Error (User Registration)
+If you hit a `Failed to fetch` or `500` error during registration (specifically in `backend/api/auth.py`), it is due to a known bug where `passlib==1.7.4` crashes when used with `bcrypt>=4.0.0` (which is written in Rust and strictly requires `bytes`). We have permanently fixed this by entirely ripping out `passlib` and calling `bcrypt` directly. We also bypass `bcrypt`'s strict 72-character maximum password limit by pre-hashing the user's password using `SHA-256`, ensuring maximum stability and security.
+
 ### 🧪 System Check
 Run the diagnostic to verify your setup:
 ```bash
@@ -330,9 +335,11 @@ python diagnose_env.py
 | `GROQ_API_KEY` | 1 of 3 | Lightning fast inference (Llama 3.3) |
 | `GEMINI_API_KEY` | 1 of 3 | Google Gemini native SDK |
 | `LETTA_SERVER_URL` | — | Letta server (default: `localhost:8283`) |
+| `LETTA_PG_URI` | Yes | Letta memory block connection to PostgreSQL |
 | `TELEGRAM_BOT_TOKEN` | — | Bot token for CFO alerts |
 | `TELEGRAM_CFO_CHAT_ID` | — | CFO's Telegram chat ID |
-| `SQLITE_DB_PATH` | — | SQLite path (default: `data/finclosepilot.db`) |
+| `DATABASE_URL` | Yes | Neon PostgreSQL connection string (`postgresql://...`) |
+| `REDIS_URL` | Yes | Upstash Redis connection string (`redis://...`) |
 
 ---
 
@@ -366,8 +373,8 @@ FinClosePilot/
 │   │   ├── additions/                # Form26AS, Multi-entity, Predictive, Regulatory
 │   │   └── learning/                 # RLAIF critic + RLHF collector
 │   ├── api/                          # FastAPI routes + WebSocket
-│   ├── database/                     # SQLite models + audit logger
-│   ├── memory/                       # Letta (MemGPT) client
+│   ├── database/                     # Neon PostgreSQL models + psycopg2
+│   ├── memory/                       # Letta client + Redis cache config
 │   └── notifications/                # Telegram bot
 ├── frontend/                         # ⚛️ Next.js 14
 │   └── src/app/
@@ -400,7 +407,7 @@ The dashboard provides **14 specialised tabs** for a complete end-to-end financi
 | 💸 **Cost Efficiency** | Real-time tracking of Model-Routing savings and token usage analytics. |
 | 📊 **Reports** | Automated generation of GSTR-3B, Variance, and Audit Committee decks. |
 | 💰 **Tax Optimiser** | Identification of missing deductions (§35, §43B, §80JJAA) and GST ITC opportunities. |
-| 🔎 **Audit Query** | Natural language search interface for the entire SQLite audit trail. |
+| 🔎 **Audit Query** | Natural language search interface for the entire PostgreSQL audit trail. |
 | 🌐 **Reg Monitor** | Automated tracking of CBIC, SEBI, and MCA notification updates. |
 | 🧠 **Learning** | Dashboard for RLAIF quality scores and RLHF human correction signals. |
 | ⏱️ **Predictive ETA** | Time-series projection of when the close cycle will realistically complete. |
